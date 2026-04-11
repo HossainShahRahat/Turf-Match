@@ -1,0 +1,75 @@
+import React, { useState } from "react";
+import { apiUrl } from "../lib/config.js";
+
+export default function AdminLogin() {
+  const [credentials, setCredentials] = useState({ email: "", password: "" });
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch(apiUrl("/auth/admin-login"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminId: credentials.email,
+          password: credentials.password,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Login failed");
+      localStorage.setItem("adminToken", data.token);
+      window.location.href = "/admin-panel";
+    } catch (error) {
+      setMessage(error.message);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="max-w-md mx-auto card bg-base-100 shadow">
+      <div className="card-body">
+        <h1 className="card-title text-2xl mb-6 text-center">Admin Login</h1>
+        {message && <div className="alert alert-error mb-4">{message}</div>}
+        <form onSubmit={handleSubmit}>
+          <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text">Email</span>
+            </label>
+            <input
+              type="email"
+              className="input input-bordered"
+              placeholder="admin@example.com"
+              value={credentials.email}
+              onChange={(e) =>
+                setCredentials({ ...credentials, email: e.target.value })
+              }
+              required
+            />
+          </div>
+          <div className="form-control mb-6">
+            <label className="label">
+              <span className="label-text">Password</span>
+            </label>
+            <input
+              type="password"
+              className="input input-bordered"
+              placeholder="Password"
+              value={credentials.password}
+              onChange={(e) =>
+                setCredentials({ ...credentials, password: e.target.value })
+              }
+              required
+            />
+          </div>
+          <button className="btn btn-primary w-full" disabled={loading}>
+            {loading ? "Logging in..." : "Login"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
