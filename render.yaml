@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: backend
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: node dist/server.js
+    repo: https://github.com/HossainShahRahat/Turf-Match
+
+  - type: static
+    name: frontend
+    buildCommand: cd frontend && npm install && npm run build
+    outputDirectory: frontend/dist
+    repo: https://github.com/HossainShahRahat/Turf-Match
