@@ -37,6 +37,10 @@ export default function AdminPanel() {
     type: "league",
     status: "upcoming",
     pointsMode: "score",
+    knockoutStageMode: "auto",
+    knockoutRound: "semi",
+    groupQualifiedCount: 2,
+    includeThirdPlaceMatch: false,
     teams: [],
   });
   const [tournamentStep, setTournamentStep] = useState(1); // Step 1: Basic Info, Step 2: Teams, Step 3: Players
@@ -244,15 +248,8 @@ export default function AdminPanel() {
         return;
       }
 
-      if (newTournament.type === "league") {
-        // For league, move to step 3 to configure scoring
-        setTournamentStep(3);
-        return;
-      } else {
-        // For other types, submit directly
-        await submitTournament();
-        return;
-      }
+      setTournamentStep(3);
+      return;
     }
 
     if (tournamentStep === 3) {
@@ -287,6 +284,10 @@ export default function AdminPanel() {
         type: "league",
         status: "upcoming",
         pointsMode: "score",
+        knockoutStageMode: "auto",
+        knockoutRound: "semi",
+        groupQualifiedCount: 2,
+        includeThirdPlaceMatch: false,
         teams: [],
       });
       setTempTeams([]);
@@ -1938,7 +1939,7 @@ export default function AdminPanel() {
             >
               <h3 className="font-bold text-lg">
                 🏆 Create Tournament - Step {tournamentStep}/
-                {newTournament.type === "league" ? "3" : "2"}
+                3
               </h3>
 
               {/* Step 1: Basic Information */}
@@ -1989,6 +1990,9 @@ export default function AdminPanel() {
                     >
                       <option value="league">⚽ League</option>
                       <option value="knockout">🥊 Knockout</option>
+                      <option value="group-knockout">
+                        🏆 Group Stage + Knockout
+                      </option>
                     </select>
                   </div>
 
@@ -2182,7 +2186,7 @@ export default function AdminPanel() {
                 </div>
               )}
 
-              {/* Step 3: League Configuration */}
+              {/* Step 3: Tournament Configuration */}
               {tournamentStep === 3 && newTournament.type === "league" && (
                 <div className="space-y-3">
                   <div className="bg-base-200 p-3 rounded">
@@ -2266,6 +2270,177 @@ export default function AdminPanel() {
                 </div>
               )}
 
+              {tournamentStep === 3 &&
+                newTournament.type === "knockout" && (
+                  <div className="space-y-3">
+                    <div className="bg-base-200 p-3 rounded space-y-3">
+                      <h4 className="font-bold mb-2">Knockout Setup</h4>
+                      <p className="text-xs opacity-70">
+                        Choose the first knockout round for this tournament.
+                      </p>
+                      <select
+                        className="select select-bordered w-full"
+                        value={newTournament.knockoutRound}
+                        onChange={(e) =>
+                          setNewTournament({
+                            ...newTournament,
+                            knockoutRound: e.target.value,
+                          })
+                        }
+                      >
+                        <option value="final">Direct Final</option>
+                        <option value="semi">Semi Final + Final</option>
+                        <option value="quarter">
+                          Quarter Final + Semi + Final
+                        </option>
+                      </select>
+                      <label className="label cursor-pointer justify-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="checkbox"
+                          checked={newTournament.includeThirdPlaceMatch}
+                          onChange={(e) =>
+                            setNewTournament({
+                              ...newTournament,
+                              includeThirdPlaceMatch: e.target.checked,
+                            })
+                          }
+                        />
+                        <span className="label-text">Include 3rd place match</span>
+                      </label>
+                    </div>
+
+                    <div className="bg-base-300/50 p-2 rounded text-xs">
+                      <p className="font-semibold mb-1">Tournament Summary:</p>
+                      <p>📝 Name: {newTournament.name}</p>
+                      <p>🏀 Teams: {tempTeams.length}</p>
+                      <p>🥊 Starts from: {newTournament.knockoutRound}</p>
+                    </div>
+                  </div>
+                )}
+
+              {tournamentStep === 3 &&
+                newTournament.type === "group-knockout" && (
+                  <div className="space-y-3">
+                    <div className="bg-base-200 p-3 rounded space-y-3">
+                      <h4 className="font-bold mb-2">
+                        Group Stage + Knockout Setup
+                      </h4>
+                      <p className="text-xs opacity-70">
+                        Use automatic bracket generation based on team count, or
+                        choose the knockout round manually.
+                      </p>
+
+                      <div className="join w-full">
+                        <button
+                          type="button"
+                          className={`btn join-item flex-1 ${
+                            newTournament.knockoutStageMode === "auto"
+                              ? "btn-primary"
+                              : "btn-outline"
+                          }`}
+                          onClick={() =>
+                            setNewTournament({
+                              ...newTournament,
+                              knockoutStageMode: "auto",
+                            })
+                          }
+                        >
+                          Auto by team count
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn join-item flex-1 ${
+                            newTournament.knockoutStageMode === "custom"
+                              ? "btn-primary"
+                              : "btn-outline"
+                          }`}
+                          onClick={() =>
+                            setNewTournament({
+                              ...newTournament,
+                              knockoutStageMode: "custom",
+                            })
+                          }
+                        >
+                          Custom stages
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="text-xs opacity-70 block mb-1">
+                          Teams qualifying from each group
+                        </label>
+                        <select
+                          className="select select-bordered w-full"
+                          value={newTournament.groupQualifiedCount}
+                          onChange={(e) =>
+                            setNewTournament({
+                              ...newTournament,
+                              groupQualifiedCount: Number(e.target.value),
+                            })
+                          }
+                        >
+                          <option value={1}>Top 1</option>
+                          <option value={2}>Top 2</option>
+                          <option value={4}>Top 4</option>
+                        </select>
+                      </div>
+
+                      {newTournament.knockoutStageMode === "custom" && (
+                        <div>
+                          <label className="text-xs opacity-70 block mb-1">
+                            Knockout starts from
+                          </label>
+                          <select
+                            className="select select-bordered w-full"
+                            value={newTournament.knockoutRound}
+                            onChange={(e) =>
+                              setNewTournament({
+                                ...newTournament,
+                                knockoutRound: e.target.value,
+                              })
+                            }
+                          >
+                            <option value="final">Final</option>
+                            <option value="semi">Semi Final</option>
+                            <option value="quarter">Quarter Final</option>
+                          </select>
+                        </div>
+                      )}
+
+                      <label className="label cursor-pointer justify-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="checkbox"
+                          checked={newTournament.includeThirdPlaceMatch}
+                          onChange={(e) =>
+                            setNewTournament({
+                              ...newTournament,
+                              includeThirdPlaceMatch: e.target.checked,
+                            })
+                          }
+                        />
+                        <span className="label-text">Include 3rd place match</span>
+                      </label>
+                    </div>
+
+                    <div className="bg-base-300/50 p-2 rounded text-xs">
+                      <p className="font-semibold mb-1">Tournament Summary:</p>
+                      <p>📝 Name: {newTournament.name}</p>
+                      <p>🏀 Teams: {tempTeams.length}</p>
+                      <p>
+                        🧮 Mode:{" "}
+                        {newTournament.knockoutStageMode === "auto"
+                          ? "Auto by team count"
+                          : `Custom ${newTournament.knockoutRound}`}
+                      </p>
+                      <p>
+                        ✅ Qualified per group: {newTournament.groupQualifiedCount}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
               {/* Action Buttons */}
               <div className="modal-action gap-2 justify-between">
                 {tournamentStep > 1 && (
@@ -2294,13 +2469,13 @@ export default function AdminPanel() {
                     type="submit"
                     className={`btn btn-sm ${
                       tournamentStep ===
-                      (newTournament.type === "league" ? 3 : 2)
+                      3
                         ? "btn-primary"
                         : "btn-info"
                     }`}
                   >
                     {tournamentStep ===
-                    (newTournament.type === "league" ? 3 : 2)
+                    3
                       ? "✅ Create Tournament"
                       : "Next →"}
                   </button>

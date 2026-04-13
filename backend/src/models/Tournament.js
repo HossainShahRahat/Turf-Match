@@ -28,6 +28,9 @@ const tournamentSchema = new mongoose.Schema(
         loss: { type: Number, default: 0 }
       },
       groupQualifiedCount: { type: Number, default: 2 },
+      knockoutStageMode: { type: String, enum: ["auto", "custom"], default: "auto" },
+      knockoutRound: { type: String, enum: ["final", "semi", "quarter"], default: "semi" },
+      includeThirdPlaceMatch: { type: Boolean, default: false },
       groups: {
         type: [
           new mongoose.Schema(

@@ -320,10 +320,9 @@ function computeProgression(tournament, matches) {
           (acc, g) => ({ ...acc, [g.name]: g.teams || [] }),
           {},
         )
-      : {
-          GroupA: teams.filter((_, i) => i % 2 === 0),
-          GroupB: teams.filter((_, i) => i % 2 === 1),
-        };
+      : Object.fromEntries(
+          buildDefaultGroups(teams).map((group) => [group.name, group.teams]),
+        );
     const groupBoards = [];
     for (const [groupName, groupTeams] of Object.entries(groups)) {
       const table = initTable(groupTeams);
@@ -426,6 +425,149 @@ const buildKnockoutPairs = (teams) => {
   return pairs;
 };
 
+const buildDefaultGroups = (teams) => {
+  if (teams.length <= 4) {
+    return [{ name: "Group A", teams }];
+  }
+  return [
+    {
+      name: "Group A",
+      teams: teams.filter((_, idx) => idx % 2 === 0),
+    },
+    {
+      name: "Group B",
+      teams: teams.filter((_, idx) => idx % 2 === 1),
+    },
+  ].filter((group) => group.teams.length > 0);
+};
+
+const makePlaceholderTeam = (name) => ({
+  name,
+  players: [],
+  captain: null,
+});
+
+function resolveKnockoutPlan(tournament, groups) {
+  const config = tournament.progressionConfig || {};
+  const stageMode = config.knockoutStageMode || "auto";
+  const explicitRound = config.knockoutRound || "semi";
+  const qualifiedCount = Math.max(1, Number(config.groupQualifiedCount || 2));
+  const totalQualified = groups.reduce(
+    (sum, group) => sum + Math.min(group.teams.length, qualifiedCount),
+    0,
+  );
+
+  let round = explicitRound;
+  let includeThirdPlace = Boolean(config.includeThirdPlaceMatch);
+
+  if (stageMode === "auto") {
+    if (totalQualified >= 8) round = "quarter";
+    else if (totalQualified >= 4) round = "semi";
+    else round = "final";
+
+    includeThirdPlace =
+      totalQualified >= 4 ||
+      (groups.length === 1 && groups[0].teams.length === 4 && totalQualified === 2);
+  }
+
+  return { round, includeThirdPlace, qualifiedCount, totalQualified };
+}
+
+function buildGroupKnockoutFixtures(groups, tournament) {
+  const { round, includeThirdPlace, qualifiedCount } = resolveKnockoutPlan(
+    tournament,
+    groups,
+  );
+  const fixtures = [];
+  const hasSingleGroup = groups.length === 1;
+
+  if (round === "quarter") {
+    if (hasSingleGroup) {
+      fixtures.push(
+        { teamA: "1st Group A", teamB: "8th Group A", phase: "quarter-final-1" },
+        { teamA: "4th Group A", teamB: "5th Group A", phase: "quarter-final-2" },
+        { teamA: "2nd Group A", teamB: "7th Group A", phase: "quarter-final-3" },
+        { teamA: "3rd Group A", teamB: "6th Group A", phase: "quarter-final-4" },
+      );
+    } else {
+      const first = groups[0]?.name || "Group A";
+      const second = groups[1]?.name || "Group B";
+      fixtures.push(
+        { teamA: `1st ${first}`, teamB: `4th ${second}`, phase: "quarter-final-1" },
+        { teamA: `2nd ${first}`, teamB: `3rd ${second}`, phase: "quarter-final-2" },
+        { teamA: `1st ${second}`, teamB: `4th ${first}`, phase: "quarter-final-3" },
+        { teamA: `2nd ${second}`, teamB: `3rd ${first}`, phase: "quarter-final-4" },
+      );
+    }
+    fixtures.push(
+      { teamA: "Winner Quarter 1", teamB: "Winner Quarter 2", phase: "semi-final-1" },
+      { teamA: "Winner Quarter 3", teamB: "Winner Quarter 4", phase: "semi-final-2" },
+      { teamA: "Winner Semi 1", teamB: "Winner Semi 2", phase: "final" },
+    );
+    if (includeThirdPlace) {
+      fixtures.push({
+        teamA: "Loser Semi 1",
+        teamB: "Loser Semi 2",
+        phase: "third-place",
+      });
+    }
+    return fixtures;
+  }
+
+  if (round === "semi") {
+    if (hasSingleGroup) {
+      fixtures.push(
+        { teamA: "1st Group A", teamB: "4th Group A", phase: "semi-final-1" },
+        { teamA: "2nd Group A", teamB: "3rd Group A", phase: "semi-final-2" },
+      );
+    } else {
+      const first = groups[0]?.name || "Group A";
+      const second = groups[1]?.name || "Group B";
+      fixtures.push(
+        { teamA: `1st ${first}`, teamB: `2nd ${second}`, phase: "semi-final-1" },
+        { teamA: `1st ${second}`, teamB: `2nd ${first}`, phase: "semi-final-2" },
+      );
+    }
+    fixtures.push({
+      teamA: "Winner Semi 1",
+      teamB: "Winner Semi 2",
+      phase: "final",
+    });
+    if (includeThirdPlace) {
+      fixtures.push({
+        teamA: "Loser Semi 1",
+        teamB: "Loser Semi 2",
+        phase: "third-place",
+      });
+    }
+    return fixtures;
+  }
+
+  if (hasSingleGroup && groups[0].teams.length === 4 && qualifiedCount === 2) {
+    fixtures.push(
+      { teamA: "1st Group A", teamB: "2nd Group A", phase: "final" },
+      { teamA: "3rd Group A", teamB: "4th Group A", phase: "third-place" },
+    );
+    return fixtures;
+  }
+
+  const first = groups[0]?.name || "Group A";
+  const second = groups[1]?.name || "Group B";
+  fixtures.push({
+    teamA: groups.length > 1 ? `1st ${first}` : "1st Group A",
+    teamB: groups.length > 1 ? `1st ${second}` : "2nd Group A",
+    phase: "final",
+  });
+  if (includeThirdPlace && groups.length > 1) {
+    fixtures.push({
+      teamA: `2nd ${first}`,
+      teamB: `2nd ${second}`,
+      phase: "third-place",
+    });
+  }
+  return fixtures;
+}
+
 router.get("/", async (_req, res) => {
   try {
     const tournaments = await Tournament.find(
@@ -464,6 +606,9 @@ router.post("/", requireAdminAuth, upload.single("image"), async (req, res) => {
       scoreDrawPoints,
       scoreLossPoints,
       groupQualifiedCount,
+      knockoutStageMode,
+      knockoutRound,
+      includeThirdPlaceMatch,
     } = req.body;
     if (!name || !type)
       return res.status(400).json({ message: "name and type are required" });
@@ -534,6 +679,14 @@ router.post("/", requireAdminAuth, upload.single("image"), async (req, res) => {
         groupQualifiedCount: Number.isFinite(Number(groupQualifiedCount))
           ? Number(groupQualifiedCount)
           : 2,
+        knockoutStageMode:
+          knockoutStageMode === "custom" ? "custom" : "auto",
+        knockoutRound: ["final", "semi", "quarter"].includes(knockoutRound)
+          ? knockoutRound
+          : "semi",
+        includeThirdPlaceMatch:
+          includeThirdPlaceMatch === true ||
+          includeThirdPlaceMatch === "true",
         groups,
       },
     });
@@ -850,16 +1003,7 @@ router.post(
                 .map((teamName) => teamsByName.get(teamName))
                 .filter(Boolean),
             }))
-          : [
-              {
-                name: "GroupA",
-                teams: teams.filter((_, idx) => idx % 2 === 0),
-              },
-              {
-                name: "GroupB",
-                teams: teams.filter((_, idx) => idx % 2 === 1),
-              },
-            ];
+          : buildDefaultGroups(teams);
         for (const group of groups) {
           const rounds = buildRoundRobinPairs(group.teams || []);
           for (let round = 0; round < rounds.length; round += 1)
@@ -869,6 +1013,14 @@ router.post(
                 pair[1],
                 `${group.name}-round-${round + 1}`,
               );
+        }
+        const knockoutFixtures = buildGroupKnockoutFixtures(groups, tournament);
+        for (const fixture of knockoutFixtures) {
+          await createMatchDoc(
+            makePlaceholderTeam(fixture.teamA),
+            makePlaceholderTeam(fixture.teamB),
+            fixture.phase,
+          );
         }
       }
       tournament.matches = created;
