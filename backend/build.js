@@ -16,12 +16,12 @@ mkdirSync(outdir);
 await esbuild.build({
   entryPoints: ["src/server.js"],
   bundle: true,
+  packages: "external",
   platform: "node",
   target: "node20",
   outdir: outdir,
   format: "esm",
   sourcemap: true,
-  external: ["node_modules"],
 });
 
 // Copy package.json
