@@ -8,6 +8,7 @@ export default function Tournament() {
   const [tournament, setTournament] = useState(null);
   const [progression, setProgression] = useState(null);
   const [fixtures, setFixtures] = useState([]);
+  const [topScorers, setTopScorers] = useState([]);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [loading, setLoading] = useState(true);
@@ -95,7 +96,7 @@ export default function Tournament() {
             <tbody>
               {scheduledRows.length ? (
                 scheduledRows.map((f) => (
-                  <tr key={f._id}>
+                  <tr key={f.id || `${f.teamA}-${f.teamB}-${f.phase}`}>
                     <td>{f.phase}</td>
                     <td>
                       {f.teamA} vs {f.teamB}
@@ -128,7 +129,7 @@ export default function Tournament() {
             <tbody>
               {resultRows.length ? (
                 resultRows.map((f) => (
-                  <tr key={f._id}>
+                  <tr key={f.id || `${f.teamA}-${f.teamB}-${f.phase}`}>
                     <td>{f.phase}</td>
                     <td>
                       {f.teamA} vs {f.teamB}
@@ -148,6 +149,37 @@ export default function Tournament() {
     );
   };
 
+  const renderTopScorers = (rows) => (
+    <div className="overflow-x-auto">
+      <table className="table table-zebra">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Player</th>
+            <th>ID</th>
+            <th>Goals</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length ? (
+            rows.map((row, index) => (
+              <tr key={row.playerId}>
+                <td>{index + 1}</td>
+                <td>{row.name}</td>
+                <td>{row.playerCode || "-"}</td>
+                <td>{row.goals}</td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan="4">No scorers yet</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+
   useEffect(() => {
     const loadAllTournaments = async () => {
       setLoading(true);
@@ -156,8 +188,9 @@ export default function Tournament() {
       try {
         const response = await fetch(apiUrl("/tournaments"));
         const data = await response.json();
-        if (!response.ok)
+        if (!response.ok) {
           throw new Error(data.message || "Failed to load tournaments");
+        }
         const tournaments = data.tournaments || [];
         setAllTournaments(tournaments);
         if (tournaments.length === 0) {
@@ -165,7 +198,7 @@ export default function Tournament() {
           setMessageType("warning");
         } else {
           setMessage(
-            `✅ Loaded ${tournaments.length} tournament${tournaments.length !== 1 ? "s" : ""}`,
+            `Loaded ${tournaments.length} tournament${tournaments.length !== 1 ? "s" : ""}`,
           );
           setMessageType("success");
           setSelectedTournament(tournaments[0]);
@@ -187,12 +220,14 @@ export default function Tournament() {
         apiUrl(`/tournaments/${tournamentId}/progression`),
       );
       const data = await response.json();
-      if (!response.ok)
+      if (!response.ok) {
         throw new Error(data.message || "Failed to load tournament");
-      const { tournament, progression, fixtures } = data;
+      }
+      const { tournament, progression, fixtures, topScorers } = data;
       setTournament(tournament);
       setProgression(progression);
       setFixtures(fixtures || []);
+      setTopScorers(topScorers || []);
     } catch (error) {
       console.error("Tournament details error:", error);
       setMessage(error.message);
@@ -257,7 +292,13 @@ export default function Tournament() {
                 <div className="flex flex-wrap gap-2 mb-3">
                   <span className="badge badge-outline badge-sm">{t.type}</span>
                   <span
-                    className={`badge badge-sm ${t.status === "live" ? "badge-success" : t.status === "finished" ? "badge-secondary" : "badge-warning"}`}
+                    className={`badge badge-sm ${
+                      t.status === "live"
+                        ? "badge-success"
+                        : t.status === "finished"
+                          ? "badge-secondary"
+                          : "badge-warning"
+                    }`}
                   >
                     {t.status}
                   </span>
@@ -296,7 +337,11 @@ export default function Tournament() {
                         <div>
                           <span className="font-semibold">Status:</span>{" "}
                           <span
-                            className={`badge ${tournament.status === "live" ? "badge-success" : "badge-warning"}`}
+                            className={`badge ${
+                              tournament.status === "live"
+                                ? "badge-success"
+                                : "badge-warning"
+                            }`}
                           >
                             {tournament.status}
                           </span>
@@ -314,7 +359,7 @@ export default function Tournament() {
               {progression && (
                 <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
                   <div className="card-body p-6">
-                    <h2 className="card-title text-2xl mb-6">📊 Scoreboard</h2>
+                    <h2 className="card-title text-2xl mb-6">Scoreboard</h2>
                     <div className="overflow-x-auto">
                       {renderScoreboard(
                         tournament?.type,
@@ -325,12 +370,19 @@ export default function Tournament() {
                 </div>
               )}
 
+              <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+                <div className="card-body p-6">
+                  <h2 className="card-title text-2xl mb-6">Top Scorers</h2>
+                  {renderTopScorers(topScorers)}
+                </div>
+              </div>
+
               {progression && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
                     <div className="card-body">
                       <h3 className="card-title text-xl mb-4">
-                        ✅ Qualified Teams
+                        Qualified Teams
                       </h3>
                       <ul className="space-y-2">
                         {progression.qualifiedTeams.length ? (
@@ -340,7 +392,7 @@ export default function Tournament() {
                               className="flex items-center gap-2 p-2 rounded-lg hover:bg-base-200/50"
                             >
                               <span className="badge badge-sm badge-success">
-                                ✓
+                                OK
                               </span>
                               <span className="font-medium">{team}</span>
                             </li>
@@ -357,7 +409,7 @@ export default function Tournament() {
                   <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
                     <div className="card-body">
                       <h3 className="card-title text-xl mb-4">
-                        🏆 Tournament Winner
+                        Tournament Winner
                       </h3>
                       <div className="flex items-center justify-center py-8">
                         <div className="text-center">
@@ -379,7 +431,7 @@ export default function Tournament() {
               {fixtures.length > 0 && (
                 <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
                   <div className="card-body p-6">
-                    <h2 className="card-title text-2xl mb-6">📅 Fixtures</h2>
+                    <h2 className="card-title text-2xl mb-6">Fixtures</h2>
                     <div className="space-y-6">{renderFixtures(fixtures)}</div>
                   </div>
                 </div>

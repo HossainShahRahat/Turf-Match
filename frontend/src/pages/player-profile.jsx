@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { apiUrl } from "../lib/config.js";
 
 export default function PlayerProfile() {
@@ -10,13 +10,14 @@ export default function PlayerProfile() {
     setLoading(true);
     setMessage("Loading player profile...");
     try {
-      const response = await fetch(apiUrl(`/players/${playerId}`));
+      const response = await fetch(apiUrl(`/players/profile/${playerId}`));
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Player not found");
       setPlayer(data.player);
       setMessage("");
     } catch (error) {
       setMessage(error.message);
+      setPlayer(null);
     }
     setLoading(false);
   };
@@ -49,12 +50,13 @@ export default function PlayerProfile() {
         <div className="card bg-base-100 shadow">
           <div className="card-body">
             <h1 className="card-title text-2xl">{player.name}</h1>
-            <p className="opacity-70">ID: {player._id}</p>
-            <p>Position: {player.position || "—"}</p>
-            <p>Team: {player.team || "—"}</p>
+            <p className="opacity-70">ID: {player.playerId}</p>
+            <p>Position: {player.position || "-"}</p>
+            <p>Team: {player.team || "-"}</p>
             <p>Goals: {player.stats?.goals || 0}</p>
-            <p>Assists: {player.stats?.assists || 0}</p>
             <p>Matches: {player.stats?.matches || 0}</p>
+            <p>Yellow Cards: {player.stats?.yellowCards || 0}</p>
+            <p>Red Cards: {player.stats?.redCards || 0}</p>
           </div>
         </div>
       )}

@@ -127,6 +127,64 @@ const findTournamentTeam = (teams = [], name = "") =>
         .toLowerCase(),
   );
 
+const collectTournamentPlayerIds = (teams = []) =>
+  teams.flatMap((team) => (team.players || []).map((id) => id.toString()));
+
+const validateTournamentTeamsPlayers = async (teams, res) => {
+  const allPlayerIds = collectTournamentPlayerIds(teams);
+
+  if (allPlayerIds.some((id) => !mongoose.isValidObjectId(id))) {
+    res.status(400).json({
+      message: "Team players and captains must be valid player IDs",
+    });
+    return false;
+  }
+
+  const uniquePlayerIds = [...new Set(allPlayerIds)];
+  if (uniquePlayerIds.length !== allPlayerIds.length) {
+    res
+      .status(400)
+      .json({ message: "A player can only belong to one tournament team" });
+    return false;
+  }
+
+  if (uniquePlayerIds.length > 0) {
+    const foundPlayers = await Player.countDocuments({
+      _id: { $in: uniquePlayerIds },
+    });
+    if (foundPlayers !== uniquePlayerIds.length) {
+      res.status(400).json({
+        message: "One or more tournament team players do not exist",
+      });
+      return false;
+    }
+  }
+
+  for (const team of teams) {
+    const playerIds = new Set((team.players || []).map((id) => id.toString()));
+    if (playerIds.size !== (team.players || []).length) {
+      res
+        .status(400)
+        .json({ message: `Duplicate players found in team ${team.name}` });
+      return false;
+    }
+    if (team.captain && !mongoose.isValidObjectId(team.captain)) {
+      res.status(400).json({
+        message: "Team players and captains must be valid player IDs",
+      });
+      return false;
+    }
+    if (team.captain && !playerIds.has(team.captain.toString())) {
+      res.status(400).json({
+        message: `Captain for ${team.name} must also be selected as a team player`,
+      });
+      return false;
+    }
+  }
+
+  return true;
+};
+
 const logTournamentRouteError = (scope, error, meta = {}) => {
   console.error(`[tournaments] ${scope} failed`, {
     message: error?.message,
@@ -310,6 +368,38 @@ function computeProgression(tournament, matches) {
   return { pointsMode, scoreboard, qualifiedTeams, winner };
 }
 
+function computeTopScorers(matches) {
+  const scorers = new Map();
+
+  for (const match of matches) {
+    for (const goal of match.goals || []) {
+      const player = goal.player;
+      const playerId = player?._id?.toString?.() || player?.toString?.();
+      if (!playerId) continue;
+
+      const current = scorers.get(playerId) || {
+        playerId,
+        name: player?.name || "Unknown Player",
+        playerCode: player?.playerId || "",
+        goals: 0,
+      };
+      current.goals += 1;
+      if (player?.name) current.name = player.name;
+      if (player?.playerId) current.playerCode = player.playerId;
+      scorers.set(playerId, current);
+    }
+  }
+
+  return [...scorers.values()]
+    .sort(
+      (a, b) =>
+        b.goals - a.goals ||
+        a.name.localeCompare(b.name) ||
+        a.playerCode.localeCompare(b.playerCode),
+    )
+    .slice(0, 10);
+}
+
 const buildRoundRobinPairs = (teams) => {
   const list = [...teams];
   if (list.length % 2 !== 0) list.push("BYE");
@@ -380,51 +470,8 @@ router.post("/", requireAdminAuth, upload.single("image"), async (req, res) => {
     if (!["league", "knockout", "group-knockout"].includes(type))
       return res.status(400).json({ message: "Invalid tournament type" });
     const teams = normalizeTournamentTeams(req.body.teams);
-    const allPlayerIds = teams.flatMap((team) =>
-      [...(team.players || []), team.captain].filter(Boolean),
-    );
-    if (allPlayerIds.some((id) => !mongoose.isValidObjectId(id))) {
-      return res
-        .status(400)
-        .json({
-          message: "Team players and captains must be valid player IDs",
-        });
-    }
-    const uniquePlayerIds = [...new Set(allPlayerIds)];
-    if (uniquePlayerIds.length !== allPlayerIds.length) {
-      return res
-        .status(400)
-        .json({ message: "A player can only belong to one tournament team" });
-    }
-    if (uniquePlayerIds.length > 0) {
-      const foundPlayers = await Player.countDocuments({
-        _id: { $in: uniquePlayerIds },
-      });
-      if (foundPlayers !== uniquePlayerIds.length) {
-        return res
-          .status(400)
-          .json({
-            message: "One or more tournament team players do not exist",
-          });
-      }
-    }
-    for (const team of teams) {
-      const playerIds = new Set(
-        (team.players || []).map((id) => id.toString()),
-      );
-      if (playerIds.size !== (team.players || []).length) {
-        return res
-          .status(400)
-          .json({ message: `Duplicate players found in team ${team.name}` });
-      }
-      if (team.captain && !playerIds.has(team.captain.toString())) {
-        return res
-          .status(400)
-          .json({
-            message: `Captain for ${team.name} must also be selected as a team player`,
-          });
-      }
-    }
+    const validPlayers = await validateTournamentTeamsPlayers(teams, res);
+    if (!validPlayers) return;
     const duplicateNames = new Set();
     for (const team of teams) {
       const key = team.name.toLowerCase();
@@ -506,8 +553,9 @@ router.get("/:tournamentId/progression", async (req, res) => {
       return res.status(404).json({ message: "Tournament not found" });
     const matches = await Match.find({
       _id: { $in: tournament.matches || [] },
-    });
+    }).populate("goals.player", "name playerId");
     const progression = computeProgression(tournament, matches);
+    const topScorers = computeTopScorers(matches);
     const fixtures = matches
       .sort(
         (a, b) =>
@@ -536,6 +584,7 @@ router.get("/:tournamentId/progression", async (req, res) => {
         teams: (tournament.teams || []).map(normalizeTournamentTeamForResponse),
       },
       progression,
+      topScorers,
       fixtures,
     });
   } catch (error) {
@@ -590,54 +639,8 @@ router.patch("/:tournamentId/teams", requireAdminAuth, async (req, res) => {
     if (!teams.length)
       return res.status(400).json({ message: "Teams are required" });
 
-    // Validate player ids and duplicates like in creation
-    const allPlayerIds = teams.flatMap((team) =>
-      [...(team.players || []), team.captain].filter(Boolean),
-    );
-    if (allPlayerIds.some((id) => id && !mongoose.isValidObjectId(id))) {
-      return res
-        .status(400)
-        .json({
-          message: "Team players and captains must be valid player IDs",
-        });
-    }
-    const uniquePlayerIds = [...new Set(allPlayerIds)];
-    if (uniquePlayerIds.length !== allPlayerIds.length) {
-      return res
-        .status(400)
-        .json({ message: "A player can only belong to one tournament team" });
-    }
-
-    if (uniquePlayerIds.length > 0) {
-      const foundPlayers = await Player.countDocuments({
-        _id: { $in: uniquePlayerIds },
-      });
-      if (foundPlayers !== uniquePlayerIds.length) {
-        return res
-          .status(400)
-          .json({
-            message: "One or more tournament team players do not exist",
-          });
-      }
-    }
-
-    for (const team of teams) {
-      const playerIds = new Set(
-        (team.players || []).map((id) => id.toString()),
-      );
-      if (playerIds.size !== (team.players || []).length) {
-        return res
-          .status(400)
-          .json({ message: `Duplicate players found in team ${team.name}` });
-      }
-      if (team.captain && !playerIds.has(team.captain.toString())) {
-        return res
-          .status(400)
-          .json({
-            message: `Captain for ${team.name} must also be selected as a team player`,
-          });
-      }
-    }
+    const validPlayers = await validateTournamentTeamsPlayers(teams, res);
+    if (!validPlayers) return;
 
     const tournament = await Tournament.findById(tournamentId);
     if (!tournament)

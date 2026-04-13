@@ -265,6 +265,9 @@ export default function AdminPanel() {
     try {
       const tournamentData = {
         ...newTournament,
+        scoreWinPoints: 3,
+        scoreDrawPoints: 1,
+        scoreLossPoints: 0,
         teams: tempTeams.map((team) => ({
           name: team.name,
           players: team.players,
@@ -348,6 +351,30 @@ export default function AdminPanel() {
         players: [...newTeam.players, playerId],
       });
     }
+  };
+
+  const toggleMatchPlayer = (teamKey, playerId) => {
+    const oppositeKey =
+      teamKey === "teamAPlayers" ? "teamBPlayers" : "teamAPlayers";
+    const currentTeamPlayers = newMatch[teamKey] || [];
+    const otherTeamPlayers = newMatch[oppositeKey] || [];
+
+    if (currentTeamPlayers.includes(playerId)) {
+      setNewMatch({
+        ...newMatch,
+        [teamKey]: currentTeamPlayers.filter((id) => id !== playerId),
+      });
+      return;
+    }
+
+    if (currentTeamPlayers.length >= 11 || otherTeamPlayers.includes(playerId)) {
+      return;
+    }
+
+    setNewMatch({
+      ...newMatch,
+      [teamKey]: [...currentTeamPlayers, playerId],
+    });
   };
 
   const samplePlayers = [
@@ -1625,7 +1652,7 @@ export default function AdminPanel() {
           ></div>
           <dialog open className="modal modal-open z-50">
             <form
-              className="modal-box max-w-md space-y-4"
+              className="modal-box max-w-2xl space-y-4"
               onSubmit={handleCreateMatch}
             >
               <h3 className="font-bold text-lg">⚽ Start New Match</h3>
@@ -1680,72 +1707,118 @@ export default function AdminPanel() {
                 </div>
 
                 <div>
-                  <label
-                    htmlFor="new-match-team-a-players"
-                    className="text-sm font-semibold block mb-1"
-                  >
-                    Team A Players (Optional - select from list)
-                  </label>
-                  <select
-                    id="new-match-team-a-players"
-                    name="newMatchTeamAPlayers"
-                    multiple
-                    className="select select-bordered w-full"
-                    value={newMatch.teamAPlayers}
-                    onChange={(e) =>
-                      setNewMatch({
-                        ...newMatch,
-                        teamAPlayers: Array.from(
-                          e.target.selectedOptions,
-                          (o) => o.value,
-                        ),
-                      })
-                    }
-                    size={4}
-                  >
-                    {players.map((p) => (
-                      <option key={p._id} value={p._id}>
-                        {p.name} ({p.playerId})
-                      </option>
-                    ))}
-                  </select>
+                  <p className="text-sm font-semibold block mb-1">
+                    Team A Players
+                  </p>
+                  <div className="max-h-48 overflow-y-auto border border-white/10 rounded p-2 bg-base-100">
+                    {players.map((p) => {
+                      const isSelected = newMatch.teamAPlayers.includes(p._id);
+                      const isUsedByOtherTeam = newMatch.teamBPlayers.includes(
+                        p._id,
+                      );
+                      return (
+                        <div
+                          key={`team-a-${p._id}`}
+                          className={`flex items-center justify-between gap-2 p-2 rounded text-sm ${
+                            isSelected
+                              ? "bg-primary/20 border border-primary"
+                              : "hover:bg-base-200"
+                          } ${isUsedByOtherTeam && !isSelected ? "opacity-50" : ""}`}
+                        >
+                          <span
+                            className={`flex-1 ${
+                              isUsedByOtherTeam && !isSelected
+                                ? "line-through opacity-60"
+                                : ""
+                            }`}
+                          >
+                            {p.name}{" "}
+                            <span className="text-xs opacity-60">
+                              ({p.playerId})
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${
+                              isSelected
+                                ? "btn-error btn-outline"
+                                : "btn-success btn-outline"
+                            }`}
+                            disabled={
+                              !isSelected &&
+                              (newMatch.teamAPlayers.length >= 11 ||
+                                isUsedByOtherTeam)
+                            }
+                            onClick={() =>
+                              toggleMatchPlayer("teamAPlayers", p._id)
+                            }
+                          >
+                            {isSelected ? "−" : "+"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                   <p className="text-xs opacity-60 mt-1">
-                    Hold Ctrl/Cmd to select multiple
+                    Selected: {newMatch.teamAPlayers.length}/11 players
                   </p>
                 </div>
 
                 <div>
-                  <label
-                    htmlFor="new-match-team-b-players"
-                    className="text-sm font-semibold block mb-1"
-                  >
-                    Team B Players (Optional)
-                  </label>
-                  <select
-                    id="new-match-team-b-players"
-                    name="newMatchTeamBPlayers"
-                    multiple
-                    className="select select-bordered w-full"
-                    value={newMatch.teamBPlayers}
-                    onChange={(e) =>
-                      setNewMatch({
-                        ...newMatch,
-                        teamBPlayers: Array.from(
-                          e.target.selectedOptions,
-                          (o) => o.value,
-                        ),
-                      })
-                    }
-                    size={4}
-                  >
-                    {players.map((p) => (
-                      <option key={p._id} value={p._id}>
-                        {p.name} ({p.playerId})
-                      </option>
-                    ))}
-                  </select>
+                  <p className="text-sm font-semibold block mb-1">
+                    Team B Players
+                  </p>
+                  <div className="max-h-48 overflow-y-auto border border-white/10 rounded p-2 bg-base-100">
+                    {players.map((p) => {
+                      const isSelected = newMatch.teamBPlayers.includes(p._id);
+                      const isUsedByOtherTeam = newMatch.teamAPlayers.includes(
+                        p._id,
+                      );
+                      return (
+                        <div
+                          key={`team-b-${p._id}`}
+                          className={`flex items-center justify-between gap-2 p-2 rounded text-sm ${
+                            isSelected
+                              ? "bg-primary/20 border border-primary"
+                              : "hover:bg-base-200"
+                          } ${isUsedByOtherTeam && !isSelected ? "opacity-50" : ""}`}
+                        >
+                          <span
+                            className={`flex-1 ${
+                              isUsedByOtherTeam && !isSelected
+                                ? "line-through opacity-60"
+                                : ""
+                            }`}
+                          >
+                            {p.name}{" "}
+                            <span className="text-xs opacity-60">
+                              ({p.playerId})
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${
+                              isSelected
+                                ? "btn-error btn-outline"
+                                : "btn-success btn-outline"
+                            }`}
+                            disabled={
+                              !isSelected &&
+                              (newMatch.teamBPlayers.length >= 11 ||
+                                isUsedByOtherTeam)
+                            }
+                            onClick={() =>
+                              toggleMatchPlayer("teamBPlayers", p._id)
+                            }
+                          >
+                            {isSelected ? "−" : "+"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                   <p className="text-xs opacity-60 mt-1">
-                    Hold Ctrl/Cmd to select multiple
+                    Selected: {newMatch.teamBPlayers.length}/11 players
                   </p>
                 </div>
               </div>
