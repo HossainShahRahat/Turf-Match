@@ -41,9 +41,18 @@ async function applyFinishedMatchStats(match) {
 }
 
 function getStoredMatchScore(match) {
+  const hasManualScore =
+    match.score?.teamA !== null &&
+    match.score?.teamA !== undefined &&
+    match.score?.teamB !== null &&
+    match.score?.teamB !== undefined;
   const manualTeamA = Number(match.score?.teamA);
   const manualTeamB = Number(match.score?.teamB);
-  if (Number.isFinite(manualTeamA) && Number.isFinite(manualTeamB)) {
+  if (
+    hasManualScore &&
+    Number.isFinite(manualTeamA) &&
+    Number.isFinite(manualTeamB)
+  ) {
     return { teamA: manualTeamA, teamB: manualTeamB };
   }
 

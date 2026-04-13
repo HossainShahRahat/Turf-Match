@@ -194,9 +194,18 @@ const logTournamentRouteError = (scope, error, meta = {}) => {
 };
 
 function getMatchScore(match) {
+  const hasManualScore =
+    match.score?.teamA !== null &&
+    match.score?.teamA !== undefined &&
+    match.score?.teamB !== null &&
+    match.score?.teamB !== undefined;
   const manualTeamA = Number(match.score?.teamA);
   const manualTeamB = Number(match.score?.teamB);
-  if (Number.isFinite(manualTeamA) && Number.isFinite(manualTeamB)) {
+  if (
+    hasManualScore &&
+    Number.isFinite(manualTeamA) &&
+    Number.isFinite(manualTeamB)
+  ) {
     return { teamAScore: manualTeamA, teamBScore: manualTeamB };
   }
   const teamAIds = new Set(
