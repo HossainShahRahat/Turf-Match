@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.js",
+    "build": "cd backend && npm install && cd .. && node build.js",
     "build:frontend": "cd frontend && npm install && npm run build",
     "build:backend": "cd backend && npm install && node build.js"
   },

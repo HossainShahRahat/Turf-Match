@@ -53,9 +53,9 @@ const MainLayout = ({ children }) => {
   }, [getToken]);
 
   return (
-    <div className="min-h-screen bg-base-200 font-sans text-base-content flex">
+    <div className="min-h-screen bg-base-200 font-sans text-base-content">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex flex-col w-64 shrink-0 h-screen p-6 bg-base-100/60 backdrop-blur-md border-r border-white/5">
+      <aside className="hidden lg:flex fixed left-0 top-0 z-40 flex-col w-64 h-screen p-6 bg-base-100/60 backdrop-blur-md border-r border-white/5">
         <div className="mb-6">
           <Link to="/" className="text-xl font-black tracking-tight uppercase">
             Turf<span className="text-primary">Match</span>
@@ -276,9 +276,9 @@ const MainLayout = ({ children }) => {
       </aside>
 
       {/* Main area */}
-      <div className="flex-1 flex flex-col">
-        <header className="w-full bg-base-100/40 backdrop-blur-sm border-b border-white/5 sticky top-0 z-40">
-          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+      <div className="flex min-h-screen flex-col lg:pl-64">
+        <header className="fixed top-0 left-0 right-0 lg:left-64 z-30 bg-base-100/70 backdrop-blur-sm border-b border-white/5">
+          <div className="px-4 py-3 lg:px-8 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -328,7 +328,7 @@ const MainLayout = ({ children }) => {
           </div>
         </header>
 
-        <main className="p-6 lg:p-10 max-w-7xl mx-auto w-full flex-1">
+        <main className="flex-1 pt-24 p-6 lg:p-10 lg:pt-24 max-w-7xl w-full mx-auto">
           {children}
         </main>
       </div>
