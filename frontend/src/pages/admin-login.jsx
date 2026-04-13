@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 import { apiUrl } from "../lib/config.js";
+import { Eye, EyeOff } from "lucide-react";
 
 export default function AdminLogin() {
   const [credentials, setCredentials] = useState({ email: "", password: "" });
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -54,16 +56,30 @@ export default function AdminLogin() {
             <label className="label">
               <span className="label-text">Password</span>
             </label>
-            <input
-              type="password"
-              className="input input-bordered"
-              placeholder="Password"
-              value={credentials.password}
-              onChange={(e) =>
-                setCredentials({ ...credentials, password: e.target.value })
-              }
-              required
-            />
+            <label className="input input-bordered flex items-center gap-2">
+              <input
+                type={showPassword ? "text" : "password"}
+                className="grow"
+                placeholder="Password"
+                value={credentials.password}
+                onChange={(e) =>
+                  setCredentials({ ...credentials, password: e.target.value })
+                }
+                required
+              />
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={() => setShowPassword((current) => !current)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </label>
           </div>
           <button className="btn btn-primary w-full" disabled={loading}>
             {loading ? "Logging in..." : "Login"}
