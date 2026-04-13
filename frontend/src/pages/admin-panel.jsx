@@ -76,6 +76,7 @@ export default function AdminPanel() {
   const [fixtureGenerationForm, setFixtureGenerationForm] = useState({
     startDate: "",
     intervalHours: 24,
+    generationMode: "rounds",
   });
   const [fixtureScheduleDrafts, setFixtureScheduleDrafts] = useState({});
   const [manualFixtureForm, setManualFixtureForm] = useState({
@@ -710,6 +711,7 @@ export default function AdminPanel() {
           body: JSON.stringify({
             startDate: fixtureGenerationForm.startDate || undefined,
             intervalHours: Number(fixtureGenerationForm.intervalHours) || 24,
+            generationMode: fixtureGenerationForm.generationMode || "rounds",
           }),
         },
       );
@@ -1417,6 +1419,33 @@ export default function AdminPanel() {
                         />
                       </div>
                     </div>
+                    {(selectedTournamentDetails?.type || selectedTournament?.type) ===
+                      "league" && (
+                      <div>
+                        <label
+                          htmlFor="fixture-generation-mode"
+                          className="text-xs opacity-70 block mb-1"
+                        >
+                          Fixture order
+                        </label>
+                        <select
+                          id="fixture-generation-mode"
+                          className="select select-bordered w-full"
+                          value={fixtureGenerationForm.generationMode}
+                          onChange={(e) =>
+                            setFixtureGenerationForm((current) => ({
+                              ...current,
+                              generationMode: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="rounds">Round by round</option>
+                          <option value="sequential">
+                            Sequential pairs (A-B, A-C, B-C)
+                          </option>
+                        </select>
+                      </div>
+                    )}
                     <button
                       type="button"
                       className="btn btn-warning btn-sm"

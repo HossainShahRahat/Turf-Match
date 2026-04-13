@@ -439,6 +439,16 @@ const buildKnockoutPairs = (teams) => {
   return pairs;
 };
 
+const buildSequentialPairs = (teams) => {
+  const pairs = [];
+  for (let i = 0; i < teams.length; i += 1) {
+    for (let j = i + 1; j < teams.length; j += 1) {
+      pairs.push([teams[i], teams[j]]);
+    }
+  }
+  return pairs;
+};
+
 const buildDefaultGroups = (teams) => {
   if (teams.length <= 4) {
     return [{ name: "Group A", teams }];
@@ -959,7 +969,7 @@ router.post(
   async (req, res) => {
     try {
       const { tournamentId } = req.params;
-      const { startDate, intervalHours } = req.body;
+      const { startDate, intervalHours, generationMode } = req.body;
       if (!mongoose.isValidObjectId(tournamentId))
         return res.status(400).json({ message: "Invalid tournament ID" });
       const tournament = await Tournament.findById(tournamentId);
@@ -1030,10 +1040,22 @@ router.post(
       };
 
       if (tournament.type === "league") {
-        const rounds = buildRoundRobinPairs(teams);
-        for (let round = 0; round < rounds.length; round += 1)
-          for (const pair of rounds[round])
-            await createMatchDoc(pair[0], pair[1], `league-round-${round + 1}`);
+        if (generationMode === "sequential") {
+          const pairs = buildSequentialPairs(teams);
+          for (let matchNumber = 0; matchNumber < pairs.length; matchNumber += 1) {
+            const pair = pairs[matchNumber];
+            await createMatchDoc(
+              pair[0],
+              pair[1],
+              `league-match-${matchNumber + 1}`,
+            );
+          }
+        } else {
+          const rounds = buildRoundRobinPairs(teams);
+          for (let round = 0; round < rounds.length; round += 1)
+            for (const pair of rounds[round])
+              await createMatchDoc(pair[0], pair[1], `league-round-${round + 1}`);
+        }
       } else if (tournament.type === "knockout") {
         const pairs = buildKnockoutPairs(teams);
         for (const pair of pairs)
