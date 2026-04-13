@@ -110,7 +110,8 @@ router.get("/schedule/upcoming", async (_req, res) => {
       .limit(100)
       .populate("teams.players", "name playerId")
       .populate("teams.captain", "name playerId")
-      .populate("goals.player", "name playerId");
+      .populate("goals.player", "name playerId")
+      .populate("cards.player", "name playerId");
     return res.status(200).json({ matches: matches.map((m) => mapMatchResponse(m)) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -124,7 +125,8 @@ router.get("/schedule/recent-results", async (_req, res) => {
       .limit(50)
       .populate("teams.players", "name playerId")
       .populate("teams.captain", "name playerId")
-      .populate("goals.player", "name playerId");
+      .populate("goals.player", "name playerId")
+      .populate("cards.player", "name playerId");
     return res.status(200).json({ matches: matches.map((m) => mapMatchResponse(m)) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -187,7 +189,11 @@ router.post("/:matchId/goals", requireAdminAuth, async (req, res) => {
     if (match.status === "upcoming") match.status = "live";
     await match.save();
 
-    const populated = await Match.findById(match._id).populate("teams.players", "name playerId").populate("teams.captain", "name playerId").populate("goals.player", "name playerId");
+    const populated = await Match.findById(match._id)
+      .populate("teams.players", "name playerId")
+      .populate("teams.captain", "name playerId")
+      .populate("goals.player", "name playerId")
+      .populate("cards.player", "name playerId");
     const payload = mapMatchResponse(populated);
     const io = req.app.get("io");
     io.emit("match:updated", payload);
@@ -213,11 +219,22 @@ router.patch("/:matchId/status", requireAdminAuth, async (req, res) => {
     await match.save();
     if (status === "finished") await applyFinishedMatchStats(match);
 
-    const populated = await Match.findById(match._id).populate("teams.players", "name playerId").populate("teams.captain", "name playerId").populate("goals.player", "name playerId");
+    const populated = await Match.findById(match._id)
+      .populate("teams.players", "name playerId")
+      .populate("teams.captain", "name playerId")
+      .populate("goals.player", "name playerId")
+      .populate("cards.player", "name playerId");
     const payload = mapMatchResponse(populated);
     const io = req.app.get("io");
     io.emit("match:updated", payload);
     io.to(match._id.toString()).emit("match:updated", payload);
+    if (status === "finished") {
+      io.emit("match:statusChanged", { matchId: match._id.toString(), status });
+      io.to(match._id.toString()).emit("match:statusChanged", {
+        matchId: match._id.toString(),
+        status,
+      });
+    }
     return res.status(200).json({ match: payload });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -298,7 +315,8 @@ router.patch("/:matchId/schedule", requireAdminAuth, async (req, res) => {
     const populated = await Match.findById(match._id)
       .populate("teams.players", "name playerId")
       .populate("teams.captain", "name playerId")
-      .populate("goals.player", "name playerId");
+      .populate("goals.player", "name playerId")
+      .populate("cards.player", "name playerId");
 
     const payload = mapMatchResponse(populated);
     const io = req.app.get("io");

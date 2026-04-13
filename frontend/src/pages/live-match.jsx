@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 import { Activity, Plus, ShieldAlert, Trophy } from "lucide-react";
-import { apiUrl } from "../lib/config.js";
+import { apiUrl, socketBaseUrl } from "../lib/config.js";
 import { useAuth } from "../lib/auth.jsx";
 
 export default function LiveMatch() {
@@ -356,7 +356,7 @@ export default function LiveMatch() {
     loadAllLiveMatches();
 
     const token = getToken();
-    const socket = io(undefined, {
+    const socket = io(socketBaseUrl(), {
       auth: token ? { token } : {},
       reconnection: true,
       reconnectionDelay: 1000,

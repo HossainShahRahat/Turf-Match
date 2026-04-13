@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth.jsx";
 import { RefreshCw, LogOut, Menu, LogIn } from "lucide-react";
 import io from "socket.io-client";
+import { apiUrl, socketBaseUrl } from "../lib/config.js";
 
 const MainLayout = ({ children }) => {
   const { user, logout, getToken } = useAuth();
@@ -21,7 +22,7 @@ const MainLayout = ({ children }) => {
   useEffect(() => {
     // Quick health check for backend (mongo) and socket.io
     let mounted = true;
-    fetch("/health")
+    fetch(apiUrl("/health"))
       .then((r) => r.json())
       .then((d) => {
         if (!mounted) return;
@@ -30,7 +31,10 @@ const MainLayout = ({ children }) => {
       .catch(() => setMongoUp(false));
 
     const token = getToken();
-    const socket = io(undefined, { autoConnect: false, reconnection: false });
+    const socket = io(socketBaseUrl(), {
+      autoConnect: false,
+      reconnection: false,
+    });
     if (token) socket.io.opts.auth = { token };
     const timeout = setTimeout(() => {
       socketUp || socket.close();
