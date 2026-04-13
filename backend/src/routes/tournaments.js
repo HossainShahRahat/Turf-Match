@@ -194,6 +194,11 @@ const logTournamentRouteError = (scope, error, meta = {}) => {
 };
 
 function getMatchScore(match) {
+  const manualTeamA = Number(match.score?.teamA);
+  const manualTeamB = Number(match.score?.teamB);
+  if (Number.isFinite(manualTeamA) && Number.isFinite(manualTeamB)) {
+    return { teamAScore: manualTeamA, teamBScore: manualTeamB };
+  }
   const teamAIds = new Set(
     (match.teams?.[0]?.players || []).map((id) => id.toString()),
   );
@@ -827,7 +832,15 @@ router.patch("/:tournamentId/teams", requireAdminAuth, async (req, res) => {
 router.post("/:tournamentId/fixtures", requireAdminAuth, async (req, res) => {
   try {
     const { tournamentId } = req.params;
-    const { teamAName, teamBName, phase, scheduledAt, status } = req.body;
+    const {
+      teamAName,
+      teamBName,
+      phase,
+      scheduledAt,
+      status,
+      scoreTeamA,
+      scoreTeamB,
+    } = req.body;
     if (!mongoose.isValidObjectId(tournamentId)) {
       return res.status(400).json({ message: "Invalid tournament ID" });
     }
@@ -872,6 +885,23 @@ router.post("/:tournamentId/fixtures", requireAdminAuth, async (req, res) => {
       }
     }
 
+    let score = { teamA: null, teamB: null };
+    if (status === "finished") {
+      const teamAScore = Number(scoreTeamA);
+      const teamBScore = Number(scoreTeamB);
+      if (
+        !Number.isInteger(teamAScore) ||
+        !Number.isInteger(teamBScore) ||
+        teamAScore < 0 ||
+        teamBScore < 0
+      ) {
+        return res.status(400).json({
+          message: "Finished fixtures require valid team scores",
+        });
+      }
+      score = { teamA: teamAScore, teamB: teamBScore };
+    }
+
     const fixture = await Match.create({
       teams: [
         {
@@ -888,10 +918,15 @@ router.post("/:tournamentId/fixtures", requireAdminAuth, async (req, res) => {
       tournament: tournament._id,
       phase: String(phase || "regular").trim() || "regular",
       scheduledAt: parsedSchedule,
+      score,
       status: ["upcoming", "live", "finished"].includes(status)
         ? status
         : "upcoming",
     });
+
+    if (fixture.status === "finished") {
+      await applyFinishedMatchStats(fixture);
+    }
 
     tournament.matches = [...(tournament.matches || []), fixture._id];
     await tournament.save();

@@ -40,10 +40,34 @@ async function applyFinishedMatchStats(match) {
   await match.save();
 }
 
+function getStoredMatchScore(match) {
+  const manualTeamA = Number(match.score?.teamA);
+  const manualTeamB = Number(match.score?.teamB);
+  if (Number.isFinite(manualTeamA) && Number.isFinite(manualTeamB)) {
+    return { teamA: manualTeamA, teamB: manualTeamB };
+  }
+
+  const teamASet = new Set(
+    (match.teams[0].players || []).map((p) => p._id?.toString?.() || p.toString()),
+  );
+  let teamA = 0;
+  let teamB = 0;
+  for (const goal of match.goals || []) {
+    let teamIndex;
+    if (Number.isInteger(goal.teamIndex)) teamIndex = goal.teamIndex;
+    else {
+      const pid = goal.player?._id?.toString() || goal.player?.toString();
+      teamIndex = pid && teamASet.has(pid) ? 0 : 1;
+    }
+    if (teamIndex === 0) teamA += 1;
+    else teamB += 1;
+  }
+  return { teamA, teamB };
+}
+
 function mapMatchResponse(match) {
   const teamASet = new Set((match.teams[0].players || []).map((p) => p._id?.toString?.() || p.toString()));
-  let teamAScore = 0;
-  let teamBScore = 0;
+  const resolvedScore = getStoredMatchScore(match);
   const goals = (match.goals || []).map((goal) => {
     let teamIndex;
     if (Number.isInteger(goal.teamIndex)) teamIndex = goal.teamIndex;
@@ -51,7 +75,6 @@ function mapMatchResponse(match) {
       const pid = goal.player?._id?.toString() || goal.player?.toString();
       teamIndex = pid && teamASet.has(pid) ? 0 : 1;
     }
-    if (teamIndex === 0) teamAScore += 1; else teamBScore += 1;
     return { player: goal.player, minute: goal.minute, teamIndex };
   });
   const cards = (match.cards || []).map((card) => {
@@ -74,7 +97,7 @@ function mapMatchResponse(match) {
     teams: match.teams,
     goals,
     cards,
-    score: { teamA: teamAScore, teamB: teamBScore },
+    score: resolvedScore,
     scheduledAt: match.scheduledAt || null,
     phase: match.phase || "regular"
   };

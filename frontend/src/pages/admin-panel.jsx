@@ -84,6 +84,8 @@ export default function AdminPanel() {
     phase: "regular",
     scheduledAt: "",
     status: "upcoming",
+    scoreTeamA: "",
+    scoreTeamB: "",
   });
 
   const tournamentTeamOptions = (selectedTournamentDetails?.teams || [])
@@ -793,6 +795,14 @@ export default function AdminPanel() {
       setMessageType("error");
       return;
     }
+    if (
+      manualFixtureForm.status === "finished" &&
+      (manualFixtureForm.scoreTeamA === "" || manualFixtureForm.scoreTeamB === "")
+    ) {
+      setMessage("❌ Enter the final score for an old match record");
+      setMessageType("error");
+      return;
+    }
 
     try {
       await fetchWithAuth(`/tournaments/${tournamentId}/fixtures`, {
@@ -810,8 +820,14 @@ export default function AdminPanel() {
         phase: "regular",
         scheduledAt: "",
         status: "upcoming",
+        scoreTeamA: "",
+        scoreTeamB: "",
       });
-      setMessage("✅ Fixture created manually");
+      setMessage(
+        manualFixtureForm.status === "finished"
+          ? "✅ Old match record added"
+          : "✅ Fixture created manually",
+      );
       setMessageType("success");
     } catch (error) {
       setMessage(`❌ ${error.message}`);
@@ -1156,8 +1172,9 @@ export default function AdminPanel() {
                   <div>
                     <h4 className="font-semibold">Add Fixture Manually</h4>
                     <p className="text-xs opacity-60 mt-1">
-                      Use this if auto-generate is not working or if you want
-                      full control over each matchup.
+                      Use this for future fixtures or to add an old match record
+                      that was already played before you started using this
+                      project.
                     </p>
                   </div>
 
@@ -1289,13 +1306,63 @@ export default function AdminPanel() {
                     </div>
                   </div>
 
+                  {manualFixtureForm.status === "finished" && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label
+                          htmlFor="manual-fixture-score-team-a"
+                          className="text-xs opacity-70 block mb-1"
+                        >
+                          {manualFixtureForm.teamAName || "Team A"} score
+                        </label>
+                        <input
+                          id="manual-fixture-score-team-a"
+                          type="number"
+                          min="0"
+                          className="input input-bordered w-full"
+                          value={manualFixtureForm.scoreTeamA}
+                          onChange={(e) =>
+                            setManualFixtureForm((current) => ({
+                              ...current,
+                              scoreTeamA: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="manual-fixture-score-team-b"
+                          className="text-xs opacity-70 block mb-1"
+                        >
+                          {manualFixtureForm.teamBName || "Team B"} score
+                        </label>
+                        <input
+                          id="manual-fixture-score-team-b"
+                          type="number"
+                          min="0"
+                          className="input input-bordered w-full"
+                          value={manualFixtureForm.scoreTeamB}
+                          onChange={(e) =>
+                            setManualFixtureForm((current) => ({
+                              ...current,
+                              scoreTeamB: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
                     onClick={handleCreateManualFixture}
                   >
                     <Plus className="w-4" />
-                    Add Fixture
+                    {manualFixtureForm.status === "finished"
+                      ? "Add Old Match Record"
+                      : "Add Fixture"}
                   </button>
                 </div>
 

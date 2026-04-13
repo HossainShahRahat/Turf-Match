@@ -69,6 +69,10 @@ const matchSchema = new mongoose.Schema(
       required: true
     },
     goals: { type: [goalSchema], default: [] },
+    score: {
+      teamA: { type: Number, default: null, min: 0 },
+      teamB: { type: Number, default: null, min: 0 }
+    },
     cards: { type: [cardSchema], default: [] },
     ratings: {
       type: [
