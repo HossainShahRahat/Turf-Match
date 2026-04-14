@@ -43,6 +43,12 @@ const tournamentSchema = new mongoose.Schema(
         ],
         default: []
       }
+    },
+    transferMarketEnabled: { type: Boolean, default: false },
+    squadRules: {
+      livePlayersPerTeam: { type: Number, default: 7, min: 1 },
+      subPlayersPerTeam: { type: Number, default: 4, min: 0 },
+      allowSwapPlayers: { type: Boolean, default: true }
     }
   },
   { timestamps: true }

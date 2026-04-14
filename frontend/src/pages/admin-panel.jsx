@@ -2,6 +2,7 @@
 import { useNavigate } from "react-router-dom";
 import { apiUrl } from "../lib/config.js";
 import { useAuth } from "../lib/auth.jsx";
+import { pushNotification, pushToast } from "../lib/ui-feedback.js";
 import {
   Plus,
   Trophy,
@@ -36,6 +37,10 @@ export default function AdminPanel() {
     name: "",
     type: "league",
     status: "upcoming",
+    transferMarketEnabled: false,
+    livePlayersPerTeam: 7,
+    subPlayersPerTeam: 4,
+    allowSwapPlayers: true,
     pointsMode: "score",
     knockoutStageMode: "auto",
     knockoutRound: "semi",
@@ -53,6 +58,12 @@ export default function AdminPanel() {
   const [showEditTeamsModal, setShowEditTeamsModal] = useState(false);
   const [hasSampleData, setHasSampleData] = useState(false);
   const [creatingData, setCreatingData] = useState(false);
+  const [confirmBox, setConfirmBox] = useState({
+    open: false,
+    title: "",
+    text: "",
+    onConfirm: null,
+  });
 
   // Match Management States
   const [showCreateMatchModal, setShowCreateMatchModal] = useState(false);
@@ -88,6 +99,12 @@ export default function AdminPanel() {
     scoreTeamA: "",
     scoreTeamB: "",
   });
+  const [playerEdit, setPlayerEdit] = useState({ playerMongoId: "", name: "", email: "" });
+  const [transferForm, setTransferForm] = useState({
+    playerId: "",
+    fromTeamName: "",
+    toTeamName: "",
+  });
 
   const tournamentTeamOptions = (selectedTournamentDetails?.teams || [])
     .map((team) => (typeof team === "string" ? team : team?.name))
@@ -119,6 +136,17 @@ export default function AdminPanel() {
       throw new Error(data.message || "Request failed");
     }
     return response.json();
+  };
+
+  const notify = (text, type = "info") => {
+    setMessage(text);
+    setMessageType(type === "error" ? "error" : type === "success" ? "success" : "info");
+    pushToast({ text, type });
+    pushNotification(text, type);
+  };
+
+  const openConfirm = (title, text, onConfirm) => {
+    setConfirmBox({ open: true, title, text, onConfirm });
   };
 
   const loadStats = async () => {
@@ -286,6 +314,10 @@ export default function AdminPanel() {
         name: "",
         type: "league",
         status: "upcoming",
+        transferMarketEnabled: false,
+        livePlayersPerTeam: 7,
+        subPlayersPerTeam: 4,
+        allowSwapPlayers: true,
         pointsMode: "score",
         knockoutStageMode: "auto",
         knockoutRound: "semi",
@@ -296,11 +328,9 @@ export default function AdminPanel() {
       setTempTeams([]);
       setNewTeam({ name: "", players: [] });
       loadTournaments();
-      setMessage("✅ Tournament created successfully!");
-      setMessageType("success");
+      notify("Tournament created successfully", "success");
     } catch (error) {
-      setMessage(`❌ ${error.message}`);
-      setMessageType("error");
+      notify(error.message, "error");
     }
   };
 
@@ -526,57 +556,50 @@ export default function AdminPanel() {
   };
 
   const handleDeleteSampleData = async () => {
-    if (
-      !window.confirm(
-        "⚠️ Are you sure you want to delete all sample data? This cannot be undone.",
-      )
-    ) {
-      return;
-    }
+    openConfirm(
+      "Delete sample data",
+      "Are you sure you want to delete all sample data? This cannot be undone.",
+      async () => {
+        setCreatingData(true);
+        try {
+          const samplePlayerIds = samplePlayers.map((p) => p.playerId);
+          const sampleTournamentNames = sampleTournaments.map((t) => t.name);
 
-    setCreatingData(true);
-    try {
-      const samplePlayerIds = samplePlayers.map((p) => p.playerId);
-      const sampleTournamentNames = sampleTournaments.map((t) => t.name);
-
-      // Delete sample players (note: you may need to add a delete endpoint)
-      for (const player of players) {
-        if (samplePlayerIds.includes(player.playerId)) {
-          try {
-            await fetchWithAuth(`/players/${player._id}`, { method: "DELETE" });
-          } catch (error) {
-            console.error(`Could not delete player ${player.name}:`, error);
+          for (const player of players) {
+            if (samplePlayerIds.includes(player.playerId)) {
+              try {
+                await fetchWithAuth(`/players/${player._id}`, { method: "DELETE" });
+              } catch (error) {
+                console.error(`Could not delete player ${player.name}:`, error);
+              }
+            }
           }
-        }
-      }
 
-      // Delete sample tournaments
-      for (const tournament of tournaments) {
-        if (sampleTournamentNames.includes(tournament.name)) {
-          try {
-            await fetchWithAuth(`/tournaments/${tournament._id}`, {
-              method: "DELETE",
-            });
-          } catch (error) {
-            console.error(
-              `Could not delete tournament ${tournament.name}:`,
-              error,
-            );
+          for (const tournament of tournaments) {
+            if (sampleTournamentNames.includes(tournament.name)) {
+              try {
+                await fetchWithAuth(`/tournaments/${tournament._id}`, {
+                  method: "DELETE",
+                });
+              } catch (error) {
+                console.error(
+                  `Could not delete tournament ${tournament.name}:`,
+                  error,
+                );
+              }
+            }
           }
-        }
-      }
 
-      // Reload data
-      await Promise.all([loadStats(), loadPlayers(), loadTournaments()]);
-      setHasSampleData(false);
-      setMessage("✅ Sample data deleted successfully!");
-      setMessageType("success");
-    } catch (error) {
-      setMessage(`❌ Error deleting sample data: ${error.message}`);
-      setMessageType("error");
-    } finally {
-      setCreatingData(false);
-    }
+          await Promise.all([loadStats(), loadPlayers(), loadTournaments()]);
+          setHasSampleData(false);
+          notify("Sample data deleted successfully", "success");
+        } catch (error) {
+          notify(`Error deleting sample data: ${error.message}`, "error");
+        } finally {
+          setCreatingData(false);
+        }
+      },
+    );
   };
 
   const handleCreateMatch = async (e) => {
@@ -632,27 +655,19 @@ export default function AdminPanel() {
   };
 
   const handleEndMatch = async (matchId) => {
-    console.log("End match called with ID:", matchId);
-    if (!window.confirm("⚠️ Are you sure you want to end this match?")) {
-      return;
-    }
-
-    try {
-      console.log("Sending PATCH request to end match:", matchId);
-      const response = await fetchWithAuth(`/matches/${matchId}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "finished" }),
-      });
-      console.log("Match ended successfully:", response);
-      await loadLiveMatches();
-      setSelectedLiveMatch(null);
-      setMessage("✅ Match ended successfully!");
-      setMessageType("success");
-    } catch (error) {
-      console.error("Error ending match:", error);
-      setMessage(`❌ ${error.message}`);
-      setMessageType("error");
-    }
+    openConfirm("Finish match", "Are you sure you want to end this match?", async () => {
+      try {
+        await fetchWithAuth(`/matches/${matchId}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "finished" }),
+        });
+        await loadLiveMatches();
+        setSelectedLiveMatch(null);
+        notify("Match ended successfully", "success");
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    });
   };
 
   const loadTournamentDetails = async (tournamentId) => {
@@ -837,6 +852,63 @@ export default function AdminPanel() {
     }
   };
 
+  const handleDeleteTournamentHistoryItem = async (fixtureId) => {
+    const tournamentId = selectedTournament?._id || selectedTournament?.id;
+    if (!tournamentId || !fixtureId) return;
+    openConfirm(
+      "Delete history item",
+      "Delete this old tournament match record?",
+      async () => {
+        try {
+          await fetchWithAuth(`/tournaments/${tournamentId}/fixtures/${fixtureId}`, {
+            method: "DELETE",
+          });
+          await Promise.all([
+            loadTournamentDetails(tournamentId),
+            loadTournaments(),
+            loadLiveMatches(),
+          ]);
+          notify("Tournament history item deleted", "success");
+        } catch (error) {
+          notify(error.message, "error");
+        }
+      },
+    );
+  };
+
+  const handleTransferLeaguePlayer = async () => {
+    const tournamentId = selectedTournament?._id || selectedTournament?.id;
+    if (!tournamentId) return;
+    try {
+      await fetchWithAuth(`/tournaments/${tournamentId}/transfer-player`, {
+        method: "POST",
+        body: JSON.stringify(transferForm),
+      });
+      await loadTournamentDetails(tournamentId);
+      setTransferForm({ playerId: "", fromTeamName: "", toTeamName: "" });
+      notify("Player transferred to new team", "success");
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
+  const handleEditPlayer = async () => {
+    if (!playerEdit.playerMongoId) return;
+    try {
+      await fetchWithAuth(`/players/${playerEdit.playerMongoId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: playerEdit.name,
+          email: playerEdit.email,
+        }),
+      });
+      await loadPlayers();
+      notify("Player updated", "success");
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  };
+
   const handleOpenTournamentLiveMatch = async (fixtureId) => {
     if (!fixtureId) return;
     await loadLiveMatches();
@@ -988,6 +1060,31 @@ export default function AdminPanel() {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-2">
+            <input
+              className="input input-bordered input-sm"
+              placeholder="Player Mongo ID"
+              value={playerEdit.playerMongoId}
+              onChange={(e) =>
+                setPlayerEdit({ ...playerEdit, playerMongoId: e.target.value })
+              }
+            />
+            <input
+              className="input input-bordered input-sm"
+              placeholder="New name"
+              value={playerEdit.name}
+              onChange={(e) => setPlayerEdit({ ...playerEdit, name: e.target.value })}
+            />
+            <input
+              className="input input-bordered input-sm"
+              placeholder="New email"
+              value={playerEdit.email}
+              onChange={(e) => setPlayerEdit({ ...playerEdit, email: e.target.value })}
+            />
+            <button type="button" className="btn btn-info btn-sm" onClick={handleEditPlayer}>
+              Edit Player
+            </button>
           </div>
         </div>
 
@@ -1368,6 +1465,55 @@ export default function AdminPanel() {
                   </button>
                 </div>
 
+                <div className="rounded-lg border border-white/10 bg-base-100/40 p-4 space-y-3">
+                  <h4 className="font-semibold">League Player Transfer</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                    <input
+                      className="input input-bordered input-sm"
+                      placeholder="Player Mongo ID"
+                      value={transferForm.playerId}
+                      onChange={(e) =>
+                        setTransferForm({ ...transferForm, playerId: e.target.value })
+                      }
+                    />
+                    <select
+                      className="select select-bordered select-sm"
+                      value={transferForm.fromTeamName}
+                      onChange={(e) =>
+                        setTransferForm({ ...transferForm, fromTeamName: e.target.value })
+                      }
+                    >
+                      <option value="">From team</option>
+                      {tournamentTeamOptions.map((teamName) => (
+                        <option key={`from-${teamName}`} value={teamName}>
+                          {teamName}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="select select-bordered select-sm"
+                      value={transferForm.toTeamName}
+                      onChange={(e) =>
+                        setTransferForm({ ...transferForm, toTeamName: e.target.value })
+                      }
+                    >
+                      <option value="">To team</option>
+                      {tournamentTeamOptions.map((teamName) => (
+                        <option key={`to-${teamName}`} value={teamName}>
+                          {teamName}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-warning btn-sm"
+                      onClick={handleTransferLeaguePlayer}
+                    >
+                      Transfer
+                    </button>
+                  </div>
+                </div>
+
                 {tournamentFixtures.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-white/10 p-6 text-sm opacity-70 space-y-4">
                     <p>
@@ -1568,9 +1714,20 @@ export default function AdminPanel() {
 
                               {fixture.status === "finished" &&
                                 fixture.result && (
-                                  <span className="text-sm font-mono">
-                                    {fixture.result}
-                                  </span>
+                                  <>
+                                    <span className="text-sm font-mono">
+                                      {fixture.result}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="btn btn-error btn-xs"
+                                      onClick={() =>
+                                        handleDeleteTournamentHistoryItem(fixture.id)
+                                      }
+                                    >
+                                      Delete History
+                                    </button>
+                                  </>
                                 )}
                             </div>
                           </div>
@@ -1719,7 +1876,7 @@ export default function AdminPanel() {
                         if (selectedLiveMatch?._id) {
                           handleEndMatch(selectedLiveMatch._id);
                         } else {
-                          alert("No match selected");
+                          notify("No match selected", "error");
                         }
                       }}
                       className="btn btn-error btn-sm"
@@ -2404,6 +2561,74 @@ export default function AdminPanel() {
                         />
                         <span className="label-text">Include 3rd place match</span>
                       </label>
+
+                      <label className="label cursor-pointer justify-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="checkbox"
+                          checked={newTournament.transferMarketEnabled}
+                          onChange={(e) =>
+                            setNewTournament({
+                              ...newTournament,
+                              transferMarketEnabled: e.target.checked,
+                            })
+                          }
+                        />
+                        <span className="label-text">Enable transfer market for this tournament</span>
+                      </label>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="text-xs opacity-70 block mb-1">
+                            Live players per team
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            className="input input-bordered w-full"
+                            value={newTournament.livePlayersPerTeam}
+                            onChange={(e) =>
+                              setNewTournament({
+                                ...newTournament,
+                                livePlayersPerTeam: Number(e.target.value) || 7,
+                              })
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs opacity-70 block mb-1">
+                            Sub players per team
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            className="input input-bordered w-full"
+                            value={newTournament.subPlayersPerTeam}
+                            onChange={(e) =>
+                              setNewTournament({
+                                ...newTournament,
+                                subPlayersPerTeam: Number(e.target.value) || 0,
+                              })
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs opacity-70 block mb-1">Swap players</label>
+                          <select
+                            className="select select-bordered w-full"
+                            value={newTournament.allowSwapPlayers ? "yes" : "no"}
+                            onChange={(e) =>
+                              setNewTournament({
+                                ...newTournament,
+                                allowSwapPlayers: e.target.value === "yes",
+                              })
+                            }
+                          >
+                            <option value="yes">Yes</option>
+                            <option value="no">No</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="bg-base-300/50 p-2 rounded text-xs">
@@ -2691,6 +2916,52 @@ export default function AdminPanel() {
                   onClick={submitTournamentTeamsUpdate}
                 >
                   Save Teams
+                </button>
+              </div>
+            </div>
+          </dialog>
+        </>
+      )}
+
+      {confirmBox.open && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-40"></div>
+          <dialog open className="modal modal-open z-50">
+            <div className="modal-box max-w-md">
+              <h3 className="font-bold text-lg">{confirmBox.title || "Confirm action"}</h3>
+              <p className="py-3 text-sm opacity-80">{confirmBox.text}</p>
+              <div className="modal-action">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() =>
+                    setConfirmBox({
+                      open: false,
+                      title: "",
+                      text: "",
+                      onConfirm: null,
+                    })
+                  }
+                >
+                  No
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    const action = confirmBox.onConfirm;
+                    setConfirmBox({
+                      open: false,
+                      title: "",
+                      text: "",
+                      onConfirm: null,
+                    });
+                    if (typeof action === "function") {
+                      await action();
+                    }
+                  }}
+                >
+                  Yes
                 </button>
               </div>
             </div>

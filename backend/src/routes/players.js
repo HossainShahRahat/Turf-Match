@@ -174,4 +174,49 @@ router.post("/", requireAdminAuth, async (req, res) => {
   }
 });
 
+router.patch("/:playerId", requireAdminAuth, async (req, res) => {
+  try {
+    const { playerId } = req.params;
+    const { name, email } = req.body;
+    if (!playerId) return res.status(400).json({ message: "playerId is required" });
+
+    const player = await Player.findById(playerId);
+    if (!player) return res.status(404).json({ message: "Player not found" });
+
+    if (typeof name === "string" && name.trim()) {
+      player.name = name.trim();
+    }
+    if (email !== undefined) {
+      player.email = email ? String(email).trim().toLowerCase() : undefined;
+    }
+
+    await player.save();
+    return res.status(200).json({
+      message: "Player updated",
+      player: {
+        id: player._id,
+        name: player.name,
+        playerId: player.playerId,
+        email: player.email,
+        stats: player.stats,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete("/:playerId", requireAdminAuth, async (req, res) => {
+  try {
+    const { playerId } = req.params;
+    const player = await Player.findById(playerId);
+    if (!player) return res.status(404).json({ message: "Player not found" });
+
+    await Player.deleteOne({ _id: player._id });
+    return res.status(200).json({ message: "Player deleted" });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;

@@ -40,6 +40,16 @@ const parseList = (value) => {
     .filter(Boolean);
 };
 
+const parseBoolean = (value, fallback = false) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "yes") return true;
+    if (normalized === "false" || normalized === "no") return false;
+  }
+  return fallback;
+};
+
 const parseGroups = (value) => {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -625,6 +635,10 @@ router.post("/", requireAdminAuth, upload.single("image"), async (req, res) => {
       name,
       type,
       status,
+      transferMarketEnabled,
+      livePlayersPerTeam,
+      subPlayersPerTeam,
+      allowSwapPlayers,
       pointsMode,
       scoreWinPoints,
       scoreDrawPoints,
@@ -713,6 +727,16 @@ router.post("/", requireAdminAuth, upload.single("image"), async (req, res) => {
           includeThirdPlaceMatch === "true",
         groups,
       },
+      transferMarketEnabled: parseBoolean(transferMarketEnabled, false),
+      squadRules: {
+        livePlayersPerTeam: Number.isFinite(Number(livePlayersPerTeam))
+          ? Number(livePlayersPerTeam)
+          : 7,
+        subPlayersPerTeam: Number.isFinite(Number(subPlayersPerTeam))
+          ? Number(subPlayersPerTeam)
+          : 4,
+        allowSwapPlayers: parseBoolean(allowSwapPlayers, true),
+      },
     });
     return res.status(201).json({ tournament });
   } catch (error) {
@@ -730,7 +754,9 @@ router.get("/:tournamentId/progression", async (req, res) => {
       return res.status(404).json({ message: "Tournament not found" });
     const matches = await Match.find({
       _id: { $in: tournament.matches || [] },
-    }).populate("goals.player", "name playerId");
+    })
+      .populate("goals.player", "name playerId")
+      .populate("cards.player", "name playerId");
     const progression = computeProgression(tournament, matches);
     const topScorers = computeTopScorers(matches);
     const fixtures = matches
@@ -749,6 +775,19 @@ router.get("/:tournamentId/progression", async (req, res) => {
           teamA: m.teams?.[0]?.name || "-",
           teamB: m.teams?.[1]?.name || "-",
           result: m.status === "finished" ? `${teamAScore}-${teamBScore}` : "",
+          goalEvents: (m.goals || []).map((goal) => ({
+            playerName: goal.player?.name || "Unknown",
+            playerCode: goal.player?.playerId || "",
+            minute: Number(goal.minute || 0),
+            teamIndex: Number.isInteger(goal.teamIndex) ? goal.teamIndex : null,
+          })),
+          cardEvents: (m.cards || []).map((card) => ({
+            playerName: card.player?.name || "Unknown",
+            playerCode: card.player?.playerId || "",
+            minute: Number(card.minute || 0),
+            type: card.type,
+            teamIndex: Number.isInteger(card.teamIndex) ? card.teamIndex : null,
+          })),
         };
       });
     return res.status(200).json({
@@ -758,6 +797,12 @@ router.get("/:tournamentId/progression", async (req, res) => {
         type: tournament.type,
         status: tournament.status,
         image: tournament.image,
+        transferMarketEnabled: Boolean(tournament.transferMarketEnabled),
+        squadRules: tournament.squadRules || {
+          livePlayersPerTeam: 7,
+          subPlayersPerTeam: 4,
+          allowSwapPlayers: true,
+        },
         teams: (tournament.teams || []).map(normalizeTournamentTeamForResponse),
       },
       progression,
@@ -1225,5 +1270,166 @@ router.patch(
     }
   },
 );
+
+router.delete(
+  "/:tournamentId/fixtures/:fixtureId",
+  requireAdminAuth,
+  async (req, res) => {
+    try {
+      const { tournamentId, fixtureId } = req.params;
+      if (
+        !mongoose.isValidObjectId(tournamentId) ||
+        !mongoose.isValidObjectId(fixtureId)
+      ) {
+        return res.status(400).json({ message: "Invalid tournament or fixture ID" });
+      }
+      const tournament = await Tournament.findById(tournamentId);
+      if (!tournament)
+        return res.status(404).json({ message: "Tournament not found" });
+      const existsInTournament = (tournament.matches || []).some(
+        (id) => id.toString() === fixtureId,
+      );
+      if (!existsInTournament) {
+        return res
+          .status(404)
+          .json({ message: "Fixture does not belong to this tournament" });
+      }
+
+      await Match.deleteOne({ _id: fixtureId, tournament: tournament._id });
+      tournament.matches = (tournament.matches || []).filter(
+        (id) => id.toString() !== fixtureId,
+      );
+      await tournament.save();
+      return res.status(200).json({ message: "Tournament history item deleted" });
+    } catch (error) {
+      logTournamentRouteError("DELETE /:tournamentId/fixtures/:fixtureId", error, {
+        params: req.params,
+      });
+      return res.status(500).json({ message: error.message });
+    }
+  },
+);
+
+router.post(
+  "/:tournamentId/transfer-player",
+  requireAdminAuth,
+  async (req, res) => {
+    try {
+      const { tournamentId } = req.params;
+      const { playerId, fromTeamName, toTeamName } = req.body;
+      if (!mongoose.isValidObjectId(tournamentId) || !mongoose.isValidObjectId(playerId)) {
+        return res.status(400).json({ message: "Invalid tournament or player ID" });
+      }
+      const tournament = await Tournament.findById(tournamentId);
+      if (!tournament) return res.status(404).json({ message: "Tournament not found" });
+      if (tournament.type !== "league") {
+        return res
+          .status(400)
+          .json({ message: "Player transfer is only available for league tournaments" });
+      }
+
+      const fromTeam = (tournament.teams || []).find(
+        (team) => String(team?.name || "").trim().toLowerCase() === String(fromTeamName || "").trim().toLowerCase(),
+      );
+      const toTeam = (tournament.teams || []).find(
+        (team) => String(team?.name || "").trim().toLowerCase() === String(toTeamName || "").trim().toLowerCase(),
+      );
+      if (!fromTeam || !toTeam) {
+        return res.status(400).json({ message: "Both source and destination teams are required" });
+      }
+
+      const pid = playerId.toString();
+      fromTeam.players = (fromTeam.players || []).filter((id) => id.toString() !== pid);
+      if (!(toTeam.players || []).some((id) => id.toString() === pid)) {
+        toTeam.players = [...(toTeam.players || []), new mongoose.Types.ObjectId(pid)];
+      }
+      if (fromTeam.captain && fromTeam.captain.toString() === pid) fromTeam.captain = null;
+      await tournament.save();
+
+      await Match.updateMany(
+        {
+          _id: { $in: tournament.matches || [] },
+          status: { $in: ["upcoming", "live"] },
+          "teams.name": { $in: [fromTeam.name, toTeam.name] },
+        },
+        [
+          {
+            $set: {
+              teams: {
+                $map: {
+                  input: "$teams",
+                  as: "team",
+                  in: {
+                    $cond: [
+                      { $eq: ["$$team.name", fromTeam.name] },
+                      {
+                        $mergeObjects: [
+                          "$$team",
+                          {
+                            players: {
+                              $filter: {
+                                input: "$$team.players",
+                                as: "p",
+                                cond: { $ne: ["$$p", new mongoose.Types.ObjectId(pid)] },
+                              },
+                            },
+                          },
+                        ],
+                      },
+                      {
+                        $cond: [
+                          { $eq: ["$$team.name", toTeam.name] },
+                          {
+                            $mergeObjects: [
+                              "$$team",
+                              {
+                                players: {
+                                  $setUnion: [
+                                    "$$team.players",
+                                    [new mongoose.Types.ObjectId(pid)],
+                                  ],
+                                },
+                              },
+                            ],
+                          },
+                          "$$team",
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      );
+
+      return res.status(200).json({ message: "Player transferred between teams" });
+    } catch (error) {
+      logTournamentRouteError("POST /:tournamentId/transfer-player", error, {
+        params: req.params,
+        body: req.body,
+      });
+      return res.status(500).json({ message: error.message });
+    }
+  },
+);
+
+router.delete("/:tournamentId", requireAdminAuth, async (req, res) => {
+  try {
+    const { tournamentId } = req.params;
+    if (!mongoose.isValidObjectId(tournamentId)) {
+      return res.status(400).json({ message: "Invalid tournament ID" });
+    }
+    const tournament = await Tournament.findById(tournamentId);
+    if (!tournament) return res.status(404).json({ message: "Tournament not found" });
+    await Match.deleteMany({ tournament: tournament._id });
+    await Tournament.deleteOne({ _id: tournament._id });
+    return res.status(200).json({ message: "Tournament deleted" });
+  } catch (error) {
+    logTournamentRouteError("DELETE /:tournamentId", error, { params: req.params });
+    return res.status(500).json({ message: error.message });
+  }
+});
 
 export default router;

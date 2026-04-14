@@ -1,9 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth.jsx";
-import { RefreshCw, LogOut, Menu, LogIn } from "lucide-react";
+import { RefreshCw, LogOut, Menu, LogIn, Bell } from "lucide-react";
 import io from "socket.io-client";
 import { apiUrl, socketBaseUrl } from "../lib/config.js";
+import {
+  clearNotifications,
+  getNotifications,
+  uiEvents,
+} from "../lib/ui-feedback.js";
 
 const MainLayout = ({ children }) => {
   const { user, logout, getToken } = useAuth();
@@ -12,6 +17,9 @@ const MainLayout = ({ children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mongoUp, setMongoUp] = useState(false);
   const [socketUp, setSocketUp] = useState(false);
+  const [toasts, setToasts] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -55,6 +63,28 @@ const MainLayout = ({ children }) => {
       socket.close();
     };
   }, [getToken]);
+
+  useEffect(() => {
+    const { TOAST_EVENT, NOTIFICATION_EVENT } = uiEvents();
+    setNotifications(getNotifications());
+    const onToast = (event) => {
+      const toast = event.detail;
+      if (!toast?.text) return;
+      setToasts((prev) => [...prev, toast]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((item) => item.id !== toast.id));
+      }, 2600);
+    };
+    const onNotification = () => {
+      setNotifications(getNotifications());
+    };
+    window.addEventListener(TOAST_EVENT, onToast);
+    window.addEventListener(NOTIFICATION_EVENT, onNotification);
+    return () => {
+      window.removeEventListener(TOAST_EVENT, onToast);
+      window.removeEventListener(NOTIFICATION_EVENT, onNotification);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-base-200 font-sans text-base-content">
@@ -309,6 +339,50 @@ const MainLayout = ({ children }) => {
               >
                 <RefreshCw className="w-5 h-5" />
               </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setShowNotifications((prev) => !prev)}
+                  title="Latest updates"
+                >
+                  <Bell className="w-5 h-5" />
+                  {notifications.length > 0 && (
+                    <span className="badge badge-xs badge-primary">
+                      {notifications.length}
+                    </span>
+                  )}
+                </button>
+                {showNotifications && (
+                  <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto rounded-lg border border-white/10 bg-base-100 shadow-xl p-3 z-50">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-semibold text-sm">Latest updates</p>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => clearNotifications()}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {notifications.length ? (
+                      notifications.map((item) => (
+                        <div
+                          key={item.id}
+                          className="text-xs p-2 mb-2 rounded bg-base-200/70"
+                        >
+                          <div>{item.text}</div>
+                          <div className="opacity-60 mt-1">
+                            {new Date(item.createdAt).toLocaleString()}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs opacity-60">No updates yet.</p>
+                    )}
+                  </div>
+                )}
+              </div>
               {isAdmin ? (
                 <button
                   type="button"
@@ -335,6 +409,22 @@ const MainLayout = ({ children }) => {
         <main className="flex-1 pt-24 p-6 lg:p-10 lg:pt-24 max-w-7xl w-full mx-auto">
           {children}
         </main>
+      </div>
+      <div className="fixed right-4 bottom-4 z-[60] space-y-2">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`alert ${
+              toast.type === "error"
+                ? "alert-error"
+                : toast.type === "success"
+                  ? "alert-success"
+                  : "alert-info"
+            } shadow-lg text-sm`}
+          >
+            <span>{toast.text}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
