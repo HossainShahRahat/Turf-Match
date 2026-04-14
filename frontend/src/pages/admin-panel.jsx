@@ -17,7 +17,7 @@ import {
 
 export default function AdminPanel() {
   const navigate = useNavigate();
-  const { getToken, user } = useAuth();
+  const { getToken, user, logout } = useAuth();
 
   const [stats, setStats] = useState({});
   const [players, setPlayers] = useState([]);
@@ -128,6 +128,7 @@ export default function AdminPanel() {
       },
     });
     if (response.status === 401) {
+      logout();
       navigate("/admin-login");
       throw new Error("Session expired");
     }
