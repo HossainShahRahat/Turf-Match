@@ -406,7 +406,7 @@ const MainLayout = ({ children }) => {
           </div>
         </header>
 
-        <main className="flex-1 pt-24 p-6 lg:p-10 lg:pt-24 max-w-7xl w-full mx-auto">
+        <main className="flex-1 pt-24 px-4 pb-6 lg:px-8 lg:pb-8 lg:pt-24 max-w-[1400px] w-full mx-auto">
           {children}
         </main>
       </div>

@@ -1132,7 +1132,7 @@ export default function AdminPanel() {
             <Plus className="w-4" />
             Add
           </button>
-          <div className="overflow-x-auto max-h-64">
+          <div className="overflow-auto max-h-80 rounded-lg border border-white/10">
             <table className="table table-sm">
               <thead>
                 <tr>
@@ -1142,7 +1142,7 @@ export default function AdminPanel() {
                 </tr>
               </thead>
               <tbody>
-                {players.slice(0, 8).map((p) => (
+                {players.map((p) => (
                   <tr key={p._id}>
                     <td>{p.name}</td>
                     <td className="font-mono text-xs">{p.playerId}</td>
@@ -1181,7 +1181,7 @@ export default function AdminPanel() {
             <Plus className="w-4" />
             Create
           </button>
-          <div className="overflow-x-auto max-h-64">
+          <div className="overflow-auto max-h-80 rounded-lg border border-white/10">
             <table className="table table-sm">
               <thead>
                 <tr>
@@ -1192,7 +1192,7 @@ export default function AdminPanel() {
                 </tr>
               </thead>
               <tbody>
-                {tournaments.slice(0, 8).map((t) => (
+                {tournaments.map((t) => (
                   <tr key={t._id || t.id || t.name}>
                     <td>{t.name}</td>
                     <td className="text-xs capitalize">{t.type}</td>
