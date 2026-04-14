@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Trophy } from "lucide-react";
 import { apiRequest } from "../lib/api-client.js";
+import { useAuth } from "../lib/auth.jsx";
 
 export default function Tournament() {
+  const { user } = useAuth();
   const [allTournaments, setAllTournaments] = useState([]);
   const [selectedTournament, setSelectedTournament] = useState(null);
   const [tournament, setTournament] = useState(null);
@@ -156,7 +158,7 @@ export default function Tournament() {
           <tr>
             <th>#</th>
             <th>Player</th>
-            <th>ID</th>
+            {user && <th>ID</th>}
             <th>Goals</th>
           </tr>
         </thead>
@@ -166,13 +168,13 @@ export default function Tournament() {
               <tr key={row.playerId}>
                 <td>{index + 1}</td>
                 <td>{row.name}</td>
-                <td>{row.playerCode || "-"}</td>
+                {user && <td>{row.playerCode || "-"}</td>}
                 <td>{row.goals}</td>
               </tr>
             ))
           ) : (
             <tr>
-              <td colSpan="4">No scorers yet</td>
+              <td colSpan={user ? "4" : "3"}>No scorers yet</td>
             </tr>
           )}
         </tbody>

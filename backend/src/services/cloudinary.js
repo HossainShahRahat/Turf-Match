@@ -42,3 +42,24 @@ export async function uploadTournamentImageBuffer(fileBuffer, fileName = "tourna
 
   return result.secure_url;
 }
+
+export async function uploadMatchPosterBuffer(fileBuffer, fileName = "match-poster") {
+  if (!ensureConfigured()) {
+    throw new Error(
+      "Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.",
+    );
+  }
+
+  const dataUri = `data:image/*;base64,${fileBuffer.toString("base64")}`;
+  const result = await cloudinary.uploader.upload(dataUri, {
+    folder: "turf-match/matches",
+    resource_type: "image",
+    public_id: `match-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+    use_filename: true,
+    unique_filename: false,
+    overwrite: false,
+    filename_override: fileName,
+  });
+
+  return result.secure_url;
+}

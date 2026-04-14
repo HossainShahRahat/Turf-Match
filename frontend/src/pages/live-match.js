@@ -22,7 +22,7 @@ function renderMatch(match) {
   match.goals.forEach((goal) => {
     const li = document.createElement("li");
     const teamName = goal.teamIndex === 0 ? match.teams[0].name : match.teams[1].name;
-    li.textContent = `${goal.player?.name || "Unknown"} (${goal.player?.playerId || "-"}) - ${teamName} (${goal.minute}')`;
+    li.textContent = `${goal.player?.name || "Unknown"} - ${teamName} (${goal.minute}')`;
     goalsEl.appendChild(li);
   });
 }

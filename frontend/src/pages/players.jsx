@@ -218,9 +218,11 @@ export default function Players() {
                 >
                   <div className="space-y-2">
                     <h3 className="font-bold text-lg">{player.name}</h3>
-                    <p className="text-sm opacity-70 font-mono">
-                      ID: {player.playerId}
-                    </p>
+                    {user && (
+                      <p className="text-sm opacity-70 font-mono">
+                        ID: {player.playerId}
+                      </p>
+                    )}
                     {player.email && (
                       <p className="text-sm opacity-60 truncate">
                         {player.email}
@@ -284,12 +286,14 @@ export default function Players() {
                         </button>
                       )}
                       <div className="space-y-2 text-lg opacity-80">
-                        <p>
-                          <span className="font-semibold">Player ID:</span>
-                          <span className="font-mono ml-2">
-                            {playerDetails.playerId}
-                          </span>
-                        </p>
+                        {user && (
+                          <p>
+                            <span className="font-semibold">Player ID:</span>
+                            <span className="font-mono ml-2">
+                              {playerDetails.playerId}
+                            </span>
+                          </p>
+                        )}
                         {playerDetails.email && (
                           <p>
                             <span className="font-semibold">Email:</span>

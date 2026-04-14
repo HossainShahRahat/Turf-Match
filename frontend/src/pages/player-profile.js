@@ -13,7 +13,7 @@ async function loadProfile(playerId) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.message || "Failed to load profile");
   const player = data.player;
-  document.getElementById("player-name").textContent = `${player.name} (${player.playerId})`;
+  document.getElementById("player-name").textContent = `${player.name}`;
   document.getElementById("matches").textContent = player.stats.matches ?? 0;
   document.getElementById("goals").textContent = player.stats.goals ?? 0;
   document.getElementById("rating").textContent = player.stats.rating ?? 0;

@@ -1,11 +1,23 @@
 import express from "express";
 import mongoose from "mongoose";
+import multer from "multer";
 import { Match } from "../models/Match.js";
 import { Player } from "../models/Player.js";
 import { Tournament } from "../models/Tournament.js";
 import { requireAdminAuth, requirePlayerAuth } from "../middleware/auth.js";
+import { uploadMatchPosterBuffer } from "../services/cloudinary.js";
 
 const router = express.Router();
+const posterUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 6 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype?.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed"));
+    }
+    return cb(null, true);
+  },
+});
 const oid = (ids = []) => ids.map((id) => new mongoose.Types.ObjectId(id));
 const uniq = (items) => [...new Set(items.map((item) => item.toString()))];
 
@@ -400,5 +412,35 @@ router.delete("/:matchId", requireAdminAuth, async (req, res) => {
     return res.status(500).json({ message: error.message });
   }
 });
+
+router.post(
+  "/:matchId/poster",
+  requireAdminAuth,
+  posterUpload.single("image"),
+  async (req, res) => {
+    try {
+      const { matchId } = req.params;
+      if (!mongoose.isValidObjectId(matchId)) {
+        return res.status(400).json({ message: "Invalid match ID" });
+      }
+      const match = await Match.findById(matchId);
+      if (!match) {
+        return res.status(404).json({ message: "Match not found" });
+      }
+      if (!req.file?.buffer) {
+        return res.status(400).json({ message: "Poster image file is required" });
+      }
+
+      const posterUrl = await uploadMatchPosterBuffer(
+        req.file.buffer,
+        req.file.originalname || `match-${matchId}-poster`,
+      );
+
+      return res.status(200).json({ posterUrl });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  },
+);
 
 export default router;

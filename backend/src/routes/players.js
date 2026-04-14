@@ -11,10 +11,35 @@ function generatePassword() {
   return Math.random().toString(36).slice(-10);
 }
 
+function toPositiveInt(value) {
+  if (typeof value !== "string") return null;
+  if (!/^\d+$/.test(value.trim())) return null;
+  const n = Number(value.trim());
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+async function getNextAvailablePlayerId() {
+  const players = await Player.find({}, "playerId").lean();
+  const used = new Set();
+  for (const player of players) {
+    const numericId = toPositiveInt(player.playerId);
+    if (numericId !== null) used.add(numericId);
+  }
+  let candidate = 1;
+  while (used.has(candidate)) candidate += 1;
+  return String(candidate);
+}
+
 router.get("/", async (_req, res) => {
   try {
-    const players = await Player.find({}, "name playerId email stats").sort({
-      createdAt: -1,
+    const players = await Player.find({}, "name playerId email stats");
+    players.sort((a, b) => {
+      const aNum = toPositiveInt(a.playerId);
+      const bNum = toPositiveInt(b.playerId);
+      if (aNum !== null && bNum !== null) return aNum - bNum;
+      if (aNum !== null) return -1;
+      if (bNum !== null) return 1;
+      return String(a.playerId).localeCompare(String(b.playerId));
     });
     return res.status(200).json({ players });
   } catch (error) {
@@ -132,32 +157,41 @@ router.get("/:playerId", async (req, res) => {
 
 router.post("/", requireAdminAuth, async (req, res) => {
   try {
-    const { name, playerId, email, password } = req.body;
-    if (!name || !playerId) {
+    const { name, email, password } = req.body;
+    if (!name) {
       return res
         .status(400)
-        .json({ message: "name and playerId are required" });
+        .json({ message: "name is required" });
     }
 
     const existing = await Player.findOne({
-      $or: [
-        { playerId: playerId.trim() },
-        ...(email ? [{ email: email.trim().toLowerCase() }] : []),
-      ],
+      ...(email ? { email: email.trim().toLowerCase() } : { _id: null }),
     });
     if (existing)
       return res
         .status(409)
-        .json({ message: "Player with same id/email already exists" });
+        .json({ message: "Player with same email already exists" });
 
     const rawPassword = password?.trim() || generatePassword();
     const passwordHash = await bcrypt.hash(rawPassword, 10);
-    const player = await Player.create({
-      name: name.trim(),
-      playerId: playerId.trim(),
-      email: email ? email.trim().toLowerCase() : undefined,
-      passwordHash,
-    });
+    let player = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const nextPlayerId = await getNextAvailablePlayerId();
+      try {
+        player = await Player.create({
+          name: name.trim(),
+          playerId: nextPlayerId,
+          email: email ? email.trim().toLowerCase() : undefined,
+          passwordHash,
+        });
+        break;
+      } catch (error) {
+        if (error?.code !== 11000) throw error;
+      }
+    }
+    if (!player) {
+      return res.status(500).json({ message: "Could not allocate player ID" });
+    }
 
     return res.status(201).json({
       player: {

@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { apiUrl } from "../lib/config.js";
+import { useAuth } from "../lib/auth.jsx";
 
 export default function PlayerProfile() {
+  const { user } = useAuth();
   const [player, setPlayer] = useState(null);
   const [message, setMessage] = useState("Enter player ID to load profile");
   const [loading, setLoading] = useState(false);
@@ -50,7 +52,7 @@ export default function PlayerProfile() {
         <div className="card bg-base-100 shadow">
           <div className="card-body">
             <h1 className="card-title text-2xl">{player.name}</h1>
-            <p className="opacity-70">ID: {player.playerId}</p>
+            {user && <p className="opacity-70">ID: {player.playerId}</p>}
             <p>Position: {player.position || "-"}</p>
             <p>Team: {player.team || "-"}</p>
             <p>Goals: {player.stats?.goals || 0}</p>

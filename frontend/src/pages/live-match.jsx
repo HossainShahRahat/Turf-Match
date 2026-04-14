@@ -11,6 +11,9 @@ export default function LiveMatch() {
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
+  const [livePulseMessage, setLivePulseMessage] = useState("");
+  const [scoreFlash, setScoreFlash] = useState(false);
+  const [eventFlash, setEventFlash] = useState("");
   const [loading, setLoading] = useState(true);
   const [showAddGoalModal, setShowAddGoalModal] = useState(false);
   const [showAddCardModal, setShowAddCardModal] = useState(false);
@@ -37,7 +40,44 @@ export default function LiveMatch() {
     setSelectedTeamIndex(0);
   };
 
+  const announceMatchDelta = (previousMatch, updatedMatch) => {
+    if (!previousMatch || !updatedMatch) return;
+    const prevA = Number(previousMatch.score?.teamA || 0);
+    const prevB = Number(previousMatch.score?.teamB || 0);
+    const nextA = Number(updatedMatch.score?.teamA || 0);
+    const nextB = Number(updatedMatch.score?.teamB || 0);
+    if (prevA !== nextA || prevB !== nextB) {
+      setScoreFlash(true);
+      setTimeout(() => setScoreFlash(false), 1200);
+    }
+
+    const prevGoals = previousMatch.goals?.length || 0;
+    const nextGoals = updatedMatch.goals?.length || 0;
+    if (nextGoals > prevGoals) {
+      const latestGoal = updatedMatch.goals?.[nextGoals - 1];
+      const scorer = latestGoal?.player?.name || "A player";
+      setEventFlash(`GOAL! ${scorer} (${nextA}-${nextB})`);
+      setTimeout(() => setEventFlash(""), 1800);
+      return;
+    }
+
+    const prevCards = previousMatch.cards?.length || 0;
+    const nextCards = updatedMatch.cards?.length || 0;
+    if (nextCards > prevCards) {
+      const latestCard = updatedMatch.cards?.[nextCards - 1];
+      const cardPlayer = latestCard?.player?.name || "A player";
+      const label = latestCard?.type === "red" ? "Red Card" : "Yellow Card";
+      setEventFlash(`${label}: ${cardPlayer}`);
+      setTimeout(() => setEventFlash(""), 1800);
+    }
+  };
+
   const syncUpdatedMatch = (updatedMatch) => {
+    const previous =
+      selectedMatch?._id === updatedMatch._id
+        ? selectedMatch
+        : liveMatches.find((m) => m._id === updatedMatch._id);
+    announceMatchDelta(previous, updatedMatch);
     setSelectedMatch(updatedMatch);
     setLiveMatches((matches) =>
       matches.map((m) => (m._id === updatedMatch._id ? updatedMatch : m)),
@@ -124,7 +164,11 @@ export default function LiveMatch() {
                 </h2>
               </div>
               <div className="flex flex-col items-center gap-4">
-                <div className="text-5xl font-mono font-bold">
+                <div
+                  className={`text-5xl font-mono font-bold transition-all ${
+                    scoreFlash ? "scale-110 text-success" : ""
+                  }`}
+                >
                   <span className="text-primary">
                     {matchData.score?.teamA || 0}
                   </span>
@@ -154,6 +198,11 @@ export default function LiveMatch() {
 
         <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
           <div className="card-body">
+            {eventFlash && (
+              <div className="alert alert-success mb-4 py-2 text-sm">
+                <span>{eventFlash}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between mb-4">
               <h3 className="card-title text-xl">Goals</h3>
               {user && (
@@ -198,9 +247,11 @@ export default function LiveMatch() {
                         </div>
                         <div className="text-xs opacity-60">{teamName}</div>
                       </div>
-                      <div className="text-xs opacity-60">
-                        {goal.player?.playerId || "-"}
-                      </div>
+                      {user && (
+                        <div className="text-xs opacity-60">
+                          {goal.player?.playerId || "-"}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -251,9 +302,11 @@ export default function LiveMatch() {
                         </div>
                         <div className="text-xs opacity-60">{teamName}</div>
                       </div>
-                      <div className="text-xs opacity-60">
-                        {card.player?.playerId || "-"}
-                      </div>
+                      {user && (
+                        <div className="text-xs opacity-60">
+                          {card.player?.playerId || "-"}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -305,6 +358,15 @@ export default function LiveMatch() {
   }
 
   useEffect(() => {
+    const pulseOptions = [
+      "Live desk ready: every goal updates instantly.",
+      "Big-match mode: watch momentum swing minute by minute.",
+      "Tip: open one match and track goals + cards in real time.",
+    ];
+    setLivePulseMessage(
+      pulseOptions[Math.floor(Math.random() * pulseOptions.length)],
+    );
+
     const loadAllLiveMatches = async () => {
       setLoading(true);
       setMessage("Loading live matches...");
@@ -384,6 +446,9 @@ export default function LiveMatch() {
         </h1>
         <p className="text-lg opacity-70">Real-time match updates</p>
       </div>
+      <div className="alert alert-info/80 shadow-sm">
+        <span>⚡ {livePulseMessage}</span>
+      </div>
 
       <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
         <div className="card-body p-5">
@@ -412,11 +477,19 @@ export default function LiveMatch() {
       )}
 
       {loading ? (
-        <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
-          <div className="card-body text-center py-12">
-            <span className="loading loading-spinner loading-lg mx-auto"></span>
-            <p className="mt-4 opacity-60">Loading live matches...</p>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, idx) => (
+            <div
+              key={`live-skeleton-${idx}`}
+              className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm"
+            >
+              <div className="card-body space-y-3 animate-pulse">
+                <div className="h-4 w-24 rounded bg-base-300"></div>
+                <div className="h-5 w-full rounded bg-base-300"></div>
+                <div className="h-10 w-28 mx-auto rounded bg-base-300"></div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : liveMatches.length > 0 ? (
         <div className="space-y-6">

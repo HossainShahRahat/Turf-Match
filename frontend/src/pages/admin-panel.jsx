@@ -31,7 +31,6 @@ export default function AdminPanel() {
   const [showAddTournamentModal, setShowAddTournamentModal] = useState(false);
   const [newPlayer, setNewPlayer] = useState({
     name: "",
-    playerId: "",
     email: "",
     position: "",
   });
@@ -278,7 +277,7 @@ export default function AdminPanel() {
         body: JSON.stringify(newPlayer),
       });
       setShowAddPlayerModal(false);
-      setNewPlayer({ name: "", playerId: "", email: "", position: "" });
+      setNewPlayer({ name: "", email: "", position: "" });
       loadPlayers();
       setMessage("Player added.");
       setMessageType("success");
@@ -550,6 +549,9 @@ export default function AdminPanel() {
       }
 
       const { players: createdPlayers = [] } = await fetchWithAuth("/players");
+      const createdByEmail = new Map(
+        createdPlayers.map((player) => [String(player.email || "").toLowerCase(), player]),
+      );
 
       // Create sample tournaments
       for (const tournament of sampleTournaments) {
@@ -559,10 +561,10 @@ export default function AdminPanel() {
             ...team,
             players: team.players
               .map((placeholder) => {
-                const playerNumber = placeholder.replace("sample-p", "P00");
-                return createdPlayers.find(
-                  (player) => player.playerId === playerNumber,
-                )?._id;
+                const index = Number(placeholder.replace("sample-p", "")) - 1;
+                const samplePlayer = samplePlayers[index];
+                const key = String(samplePlayer?.email || "").toLowerCase();
+                return createdByEmail.get(key)?._id;
               })
               .filter(Boolean),
           })),
@@ -593,11 +595,13 @@ export default function AdminPanel() {
       async () => {
         setCreatingData(true);
         try {
-          const samplePlayerIds = samplePlayers.map((p) => p.playerId);
+          const samplePlayerEmails = samplePlayers.map((p) =>
+            String(p.email || "").toLowerCase(),
+          );
           const sampleTournamentNames = sampleTournaments.map((t) => t.name);
 
           for (const player of players) {
-            if (samplePlayerIds.includes(player.playerId)) {
+            if (samplePlayerEmails.includes(String(player.email || "").toLowerCase())) {
               try {
                 await fetchWithAuth(`/players/${player._id}`, { method: "DELETE" });
               } catch (error) {
@@ -2203,23 +2207,6 @@ export default function AdminPanel() {
                   value={newPlayer.name}
                   onChange={(e) =>
                     setNewPlayer({ ...newPlayer, name: e.target.value })
-                  }
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="new-player-id" className="sr-only">
-                  Player ID
-                </label>
-                <input
-                  id="new-player-id"
-                  name="newPlayerId"
-                  type="text"
-                  placeholder="ID"
-                  className="input input-bordered w-full"
-                  value={newPlayer.playerId}
-                  onChange={(e) =>
-                    setNewPlayer({ ...newPlayer, playerId: e.target.value })
                   }
                   required
                 />
