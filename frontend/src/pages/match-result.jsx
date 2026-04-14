@@ -300,13 +300,13 @@ export default function MatchResult() {
             </div>
           </div>
 
-          <div className="mt-5 flex items-center justify-center gap-6 md:mt-6 md:gap-10">
-            <div className="text-center">
+          <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-6 md:mt-6 md:gap-10">
+            <div className="text-center justify-self-end">
               <p className="text-xs opacity-60">{teamA.name}</p>
               <p className="text-5xl font-black text-primary">{match.score?.teamA ?? 0}</p>
             </div>
-            <p className="text-3xl font-black opacity-50">:</p>
-            <div className="text-center">
+            <p className="text-4xl font-black leading-none opacity-50 self-center">:</p>
+            <div className="text-center justify-self-start">
               <p className="text-xs opacity-60">{teamB.name}</p>
               <p className="text-5xl font-black text-secondary">{match.score?.teamB ?? 0}</p>
             </div>

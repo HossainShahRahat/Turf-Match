@@ -6,6 +6,7 @@ import { useAuth } from "../lib/auth.jsx";
 export default function Tournament() {
   const { user } = useAuth();
   const [allTournaments, setAllTournaments] = useState([]);
+  const [playerLookup, setPlayerLookup] = useState(new Map());
   const [selectedTournament, setSelectedTournament] = useState(null);
   const [tournament, setTournament] = useState(null);
   const [progression, setProgression] = useState(null);
@@ -182,6 +183,54 @@ export default function Tournament() {
     </div>
   );
 
+  const renderPlayerTeamTable = (teams) => {
+    const rows = (teams || []).flatMap((team) => {
+      if (!team || typeof team === "string") return [];
+      const teamName = team.name || "Unknown Team";
+      const playerIds = Array.isArray(team.players) ? team.players : [];
+      return playerIds.map((playerId) => {
+        const player = playerLookup.get(String(playerId));
+        return {
+          playerId: String(playerId),
+          playerName: player?.name || "Unknown Player",
+          playerCode: player?.playerId || "-",
+          teamName,
+        };
+      });
+    });
+
+    return (
+      <div className="overflow-x-auto">
+        <table className="table table-zebra">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Player</th>
+              {user && <th>ID</th>}
+              <th>Team</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? (
+              rows.map((row, index) => (
+                <tr key={`${row.playerId}-${row.teamName}-${index}`}>
+                  <td>{index + 1}</td>
+                  <td>{row.playerName}</td>
+                  {user && <td>{row.playerCode}</td>}
+                  <td>{row.teamName}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={user ? "4" : "3"}>No team players available yet</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   useEffect(() => {
     const loadAllTournaments = async () => {
       setLoading(true);
@@ -210,6 +259,21 @@ export default function Tournament() {
       setLoading(false);
     };
     loadAllTournaments();
+  }, []);
+
+  useEffect(() => {
+    const loadPlayers = async () => {
+      try {
+        const data = await apiRequest("/players");
+        const players = data.players || [];
+        setPlayerLookup(
+          new Map(players.map((player) => [String(player._id), player])),
+        );
+      } catch {
+        setPlayerLookup(new Map());
+      }
+    };
+    loadPlayers();
   }, []);
 
   const loadTournamentDetails = async (tournamentId) => {
@@ -386,6 +450,13 @@ export default function Tournament() {
                 <div className="card-body p-6">
                   <h2 className="card-title text-2xl mb-6">Top Scorers</h2>
                   {renderTopScorers(topScorers)}
+                </div>
+              </div>
+
+              <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+                <div className="card-body p-6">
+                  <h2 className="card-title text-2xl mb-6">Player Team List</h2>
+                  {renderPlayerTeamTable(tournament.teams)}
                 </div>
               </div>
 
