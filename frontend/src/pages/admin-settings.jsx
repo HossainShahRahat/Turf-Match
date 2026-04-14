@@ -15,7 +15,6 @@ import {
 export default function AdminSettings() {
   const { getToken, user, logout } = useAuth();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [stats, setStats] = useState({
@@ -106,18 +105,6 @@ export default function AdminSettings() {
     }
   };
 
-  const handleGenerateSampleData = async () => {
-    try {
-      await fetchWithAuth("/stats/admin/sample-data", { method: "POST" });
-      setMessage("✅ Sample data generated!");
-      setMessageType("success");
-      await loadStats();
-    } catch (error) {
-      setMessage(`❌ Sample data failed: ${error.message}`);
-      setMessageType("error");
-    }
-  };
-
   useEffect(() => {
     loadStats();
   }, []);
@@ -204,14 +191,6 @@ export default function AdminSettings() {
                     Reset All Data
                   </>
                 )}
-              </button>
-              <button
-                className="btn btn-success btn-lg flex-1"
-                onClick={handleGenerateSampleData}
-                disabled={loading}
-              >
-                <RefreshCw className="w-5" />
-                Generate Sample
               </button>
             </div>
           </div>

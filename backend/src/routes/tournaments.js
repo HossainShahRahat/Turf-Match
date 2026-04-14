@@ -1012,6 +1012,7 @@ router.post(
   "/:tournamentId/fixtures/generate",
   requireAdminAuth,
   async (req, res) => {
+    const created = [];
     try {
       const { tournamentId } = req.params;
       const { startDate, intervalHours, generationMode } = req.body;
@@ -1056,7 +1057,6 @@ router.post(
           .status(400)
           .json({ message: "intervalHours must be greater than 0" });
 
-      const created = [];
       let index = 0;
       const createMatchDoc = async (teamA, teamB, phase) => {
         const scheduledAt = new Date(
@@ -1144,6 +1144,9 @@ router.post(
           matchIds: created,
         });
     } catch (error) {
+      if (created.length) {
+        await Match.deleteMany({ _id: { $in: created } }).catch(() => {});
+      }
       logTournamentRouteError("POST /:tournamentId/fixtures/generate", error, {
         tournamentId: req.params.tournamentId,
         body: req.body,

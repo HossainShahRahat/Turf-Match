@@ -10,7 +10,6 @@ import {
   Users,
   BarChart3,
   RefreshCw,
-  Database,
   Play,
   Square,
   Goal,
@@ -57,8 +56,6 @@ export default function AdminPanel() {
   const [tempTeams, setTempTeams] = useState([]);
   const [editingTournament, setEditingTournament] = useState(null);
   const [showEditTeamsModal, setShowEditTeamsModal] = useState(false);
-  const [hasSampleData, setHasSampleData] = useState(false);
-  const [creatingData, setCreatingData] = useState(false);
   const [confirmBox, setConfirmBox] = useState({
     open: false,
     title: "",
@@ -90,6 +87,7 @@ export default function AdminPanel() {
     intervalHours: 24,
     generationMode: "rounds",
   });
+  const [isGeneratingFixtures, setIsGeneratingFixtures] = useState(false);
   const [fixtureScheduleDrafts, setFixtureScheduleDrafts] = useState({});
   const [manualFixtureForm, setManualFixtureForm] = useState({
     teamAName: "",
@@ -468,202 +466,6 @@ export default function AdminPanel() {
     });
   };
 
-  const samplePlayers = [
-    {
-      name: "Cristiano Ronaldo",
-      playerId: "P001",
-      email: "cristiano@mail.com",
-      position: "Forward",
-    },
-    {
-      name: "Lionel Messi",
-      playerId: "P002",
-      email: "messi@mail.com",
-      position: "Forward",
-    },
-    {
-      name: "Neymar Jr",
-      playerId: "P003",
-      email: "neymar@mail.com",
-      position: "Winger",
-    },
-    {
-      name: "Kylian Mbappe",
-      playerId: "P004",
-      email: "mbappe@mail.com",
-      position: "Forward",
-    },
-    {
-      name: "Robert Lewandowski",
-      playerId: "P005",
-      email: "lewy@mail.com",
-      position: "Forward",
-    },
-    {
-      name: "Erling Haaland",
-      playerId: "P006",
-      email: "haaland@mail.com",
-      position: "Forward",
-    },
-    {
-      name: "Vinicius Jr",
-      playerId: "P007",
-      email: "vinicius@mail.com",
-      position: "Winger",
-    },
-    {
-      name: "Jude Bellingham",
-      playerId: "P008",
-      email: "bellingham@mail.com",
-      position: "Midfielder",
-    },
-  ];
-
-  const sampleTournaments = [
-    {
-      name: "Premier League 2026",
-      type: "league",
-      status: "live",
-      teams: [
-        { name: "Falcon FC", players: ["sample-p1", "sample-p2", "sample-p3"] },
-        {
-          name: "River City",
-          players: ["sample-p4", "sample-p5", "sample-p6"],
-        },
-      ],
-    },
-    {
-      name: "Champions League",
-      type: "knockout",
-      status: "upcoming",
-      teams: [
-        {
-          name: "Metro Stars",
-          players: ["sample-p1", "sample-p4", "sample-p7"],
-        },
-        {
-          name: "North United",
-          players: ["sample-p2", "sample-p5", "sample-p8"],
-        },
-      ],
-    },
-    {
-      name: "Copa America",
-      type: "league",
-      status: "upcoming",
-      teams: [
-        {
-          name: "Red Tigers",
-          players: ["sample-p3", "sample-p6", "sample-p7"],
-        },
-        {
-          name: "Blue Sharks",
-          players: ["sample-p1", "sample-p5", "sample-p8"],
-        },
-      ],
-    },
-  ];
-
-  const handleCreateSampleData = async () => {
-    setCreatingData(true);
-    try {
-      // Create sample players
-      for (const player of samplePlayers) {
-        await fetchWithAuth("/players", {
-          method: "POST",
-          body: JSON.stringify(player),
-        });
-      }
-
-      const { players: createdPlayers = [] } = await fetchWithAuth("/players");
-      const createdByEmail = new Map(
-        createdPlayers.map((player) => [String(player.email || "").toLowerCase(), player]),
-      );
-
-      // Create sample tournaments
-      for (const tournament of sampleTournaments) {
-        const withRealPlayerIds = {
-          ...tournament,
-          teams: tournament.teams.map((team) => ({
-            ...team,
-            players: team.players
-              .map((placeholder) => {
-                const index = Number(placeholder.replace("sample-p", "")) - 1;
-                const samplePlayer = samplePlayers[index];
-                const key = String(samplePlayer?.email || "").toLowerCase();
-                return createdByEmail.get(key)?._id;
-              })
-              .filter(Boolean),
-          })),
-        };
-        await fetchWithAuth("/tournaments", {
-          method: "POST",
-          body: JSON.stringify(withRealPlayerIds),
-        });
-      }
-
-      // Reload data
-      await Promise.all([loadStats(), loadPlayers(), loadTournaments()]);
-      setHasSampleData(true);
-      setMessage("Sample data created.");
-      setMessageType("success");
-    } catch (error) {
-      setMessage(`Could not create sample data: ${error.message}`);
-      setMessageType("error");
-    } finally {
-      setCreatingData(false);
-    }
-  };
-
-  const handleDeleteSampleData = async () => {
-    openConfirm(
-      "Delete sample data",
-      "Are you sure you want to delete all sample data? This cannot be undone.",
-      async () => {
-        setCreatingData(true);
-        try {
-          const samplePlayerEmails = samplePlayers.map((p) =>
-            String(p.email || "").toLowerCase(),
-          );
-          const sampleTournamentNames = sampleTournaments.map((t) => t.name);
-
-          for (const player of players) {
-            if (samplePlayerEmails.includes(String(player.email || "").toLowerCase())) {
-              try {
-                await fetchWithAuth(`/players/${player._id}`, { method: "DELETE" });
-              } catch (error) {
-                console.error(`Could not delete player ${player.name}:`, error);
-              }
-            }
-          }
-
-          for (const tournament of tournaments) {
-            if (sampleTournamentNames.includes(tournament.name)) {
-              try {
-                await fetchWithAuth(`/tournaments/${tournament._id}`, {
-                  method: "DELETE",
-                });
-              } catch (error) {
-                console.error(
-                  `Could not delete tournament ${tournament.name}:`,
-                  error,
-                );
-              }
-            }
-          }
-
-          await Promise.all([loadStats(), loadPlayers(), loadTournaments()]);
-          setHasSampleData(false);
-          notify("Sample data deleted successfully", "success");
-        } catch (error) {
-          notify(`Error deleting sample data: ${error.message}`, "error");
-        } finally {
-          setCreatingData(false);
-        }
-      },
-    );
-  };
-
   const handleCreateMatch = async (e) => {
     e.preventDefault();
     if (!newMatch.teamAName || !newMatch.teamBName) {
@@ -773,6 +575,7 @@ export default function AdminPanel() {
   };
 
   const handleGenerateTournamentFixtures = async () => {
+    if (isGeneratingFixtures) return;
     const tournamentId = selectedTournament?._id || selectedTournament?.id;
     if (!tournamentId) {
       setMessage("Select a tournament first.");
@@ -780,6 +583,7 @@ export default function AdminPanel() {
       return;
     }
 
+    setIsGeneratingFixtures(true);
     try {
       const data = await fetchWithAuth(
         `/tournaments/${tournamentId}/fixtures/generate`,
@@ -800,8 +604,17 @@ export default function AdminPanel() {
       setMessage(`${data.matchCount || 0} tournament fixtures generated.`);
       setMessageType("success");
     } catch (error) {
-      setMessage(`Could not generate fixtures: ${error.message}`);
+      const message = String(error?.message || "");
+      if (message.toLowerCase().includes("already has assigned matches")) {
+        setMessage(
+          "Fixtures are already generated for this tournament. Delete existing fixtures first if you need to regenerate.",
+        );
+      } else {
+        setMessage(`Could not generate fixtures: ${error.message}`);
+      }
       setMessageType("error");
+    } finally {
+      setIsGeneratingFixtures(false);
     }
   };
 
@@ -914,12 +727,15 @@ export default function AdminPanel() {
     }
   };
 
-  const handleDeleteTournamentHistoryItem = async (fixtureId) => {
+  const handleDeleteTournamentFixture = async (fixtureId, fixtureStatus) => {
     const tournamentId = selectedTournament?._id || selectedTournament?.id;
     if (!tournamentId || !fixtureId) return;
+    const isLive = String(fixtureStatus || "").toLowerCase() === "live";
     openConfirm(
-      "Delete history item",
-      "Delete this old tournament match record?",
+      "Delete fixture",
+      isLive
+        ? "This fixture is live right now. Delete it permanently?"
+        : "Delete this fixture permanently?",
       async () => {
         try {
           await fetchWithAuth(`/tournaments/${tournamentId}/fixtures/${fixtureId}`, {
@@ -930,7 +746,7 @@ export default function AdminPanel() {
             loadTournaments(),
             loadLiveMatches(),
           ]);
-          notify("Tournament history item deleted", "success");
+          notify("Tournament fixture deleted", "success");
         } catch (error) {
           notify(error.message, "error");
         }
@@ -1019,33 +835,6 @@ export default function AdminPanel() {
           </h1>
           <p className="opacity-70">Manage players & tournaments</p>
         </div>
-        <button
-          type="button"
-          onClick={
-            hasSampleData ? handleDeleteSampleData : handleCreateSampleData
-          }
-          disabled={creatingData}
-          className={`btn btn-sm ${hasSampleData ? "btn-error" : "btn-info"}`}
-          data-sample-create-btn={!hasSampleData}
-          data-sample-delete-btn={hasSampleData}
-        >
-          {creatingData ? (
-            <>
-              <span className="loading loading-spinner loading-sm"></span>
-              Processing...
-            </>
-          ) : hasSampleData ? (
-            <>
-              <Database className="w-4" />
-              Delete Sample Data
-            </>
-          ) : (
-            <>
-              <Database className="w-4" />
-              Create Sample Data
-            </>
-          )}
-        </button>
       </div>
 
       {message && (
@@ -1723,9 +1512,12 @@ export default function AdminPanel() {
                       type="button"
                       className="btn btn-warning btn-sm"
                       onClick={handleGenerateTournamentFixtures}
+                      disabled={isGeneratingFixtures}
                     >
                       <RefreshCw className="w-4" />
-                      Generate Fixtures
+                      {isGeneratingFixtures
+                        ? "Generating fixtures..."
+                        : "Generate Fixtures"}
                     </button>
                   </div>
                 ) : (
@@ -1845,17 +1637,20 @@ export default function AdminPanel() {
                                     <span className="text-sm font-mono">
                                       {fixture.result}
                                     </span>
-                                    <button
-                                      type="button"
-                                      className="btn btn-error btn-xs"
-                                      onClick={() =>
-                                        handleDeleteTournamentHistoryItem(fixture.id)
-                                      }
-                                    >
-                                      Delete History
-                                    </button>
                                   </>
                                 )}
+                              <button
+                                type="button"
+                                className="btn btn-error btn-xs"
+                                onClick={() =>
+                                  handleDeleteTournamentFixture(
+                                    fixture.id,
+                                    fixture.status,
+                                  )
+                                }
+                              >
+                                Delete Fixture
+                              </button>
                             </div>
                           </div>
                         </div>

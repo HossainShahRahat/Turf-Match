@@ -146,29 +146,6 @@ const MainLayout = ({ children }) => {
                 Admin Dashboard
               </Link>
             </div>
-            {/* Sample Data Button - Will be controlled from admin-panel */}
-            <button
-              onClick={() => {
-                // This will be handled by context or localStorage
-                const hasSampleData =
-                  localStorage.getItem("hasSampleData") === "true";
-                if (hasSampleData) {
-                  const adminPanel = document.querySelector(
-                    "[data-sample-delete-btn]",
-                  );
-                  adminPanel?.click();
-                } else {
-                  const adminPanel = document.querySelector(
-                    "[data-sample-create-btn]",
-                  );
-                  adminPanel?.click();
-                }
-              }}
-              className="w-full btn btn-sm btn-outline"
-              title="Create or delete sample data"
-            >
-              📊 Sample Data
-            </button>
           </div>
         )}
 
