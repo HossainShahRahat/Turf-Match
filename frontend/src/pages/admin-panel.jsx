@@ -757,6 +757,21 @@ export default function AdminPanel() {
   const handleTransferLeaguePlayer = async () => {
     const tournamentId = selectedTournament?._id || selectedTournament?.id;
     if (!tournamentId) return;
+    if (!transferForm.playerId) {
+      notify("Select a player to transfer.", "error");
+      return;
+    }
+    if (!transferForm.fromTeamName || !transferForm.toTeamName) {
+      notify("Select both source and destination teams.", "error");
+      return;
+    }
+    if (
+      String(transferForm.fromTeamName).trim().toLowerCase() ===
+      String(transferForm.toTeamName).trim().toLowerCase()
+    ) {
+      notify("Source and destination teams must be different.", "error");
+      return;
+    }
     try {
       await fetchWithAuth(`/tournaments/${tournamentId}/transfer-player`, {
         method: "POST",

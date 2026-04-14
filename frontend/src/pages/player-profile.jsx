@@ -36,7 +36,9 @@ export default function PlayerProfile() {
         <div className="flex gap-4">
           <input
             id="playerId"
+            name="playerId"
             type="text"
+            autoComplete="off"
             className="input input-bordered flex-1 max-w-xs"
             placeholder="Player ID"
           />

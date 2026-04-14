@@ -178,8 +178,14 @@ export default function Players() {
       </div>
 
       <div className="max-w-md">
+        <label htmlFor="players-search" className="sr-only">
+          Search player by name
+        </label>
         <input
-          type="text"
+          id="players-search"
+          name="playerSearch"
+          type="search"
+          autoComplete="off"
           className="input input-bordered w-full"
           placeholder="Search player by name..."
           value={searchTerm}
@@ -388,24 +394,40 @@ export default function Players() {
           <dialog open className="modal modal-open z-50">
             <form className="modal-box max-w-md space-y-4" onSubmit={handleAdminEditPlayer}>
               <h3 className="font-bold text-lg">Edit Player</h3>
-              <input
-                type="text"
-                className="input input-bordered w-full"
-                placeholder="Name"
-                value={editingPlayer.name}
-                onChange={(e) =>
-                  setEditingPlayer({ ...editingPlayer, name: e.target.value })
-                }
-              />
-              <input
-                type="email"
-                className="input input-bordered w-full"
-                placeholder="Email"
-                value={editingPlayer.email}
-                onChange={(e) =>
-                  setEditingPlayer({ ...editingPlayer, email: e.target.value })
-                }
-              />
+              <div className="space-y-2">
+                <label htmlFor="edit-player-name" className="text-sm font-medium">
+                  Name
+                </label>
+                <input
+                  id="edit-player-name"
+                  name="name"
+                  type="text"
+                  autoComplete="name"
+                  className="input input-bordered w-full"
+                  placeholder="Name"
+                  value={editingPlayer.name}
+                  onChange={(e) =>
+                    setEditingPlayer({ ...editingPlayer, name: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="edit-player-email" className="text-sm font-medium">
+                  Email
+                </label>
+                <input
+                  id="edit-player-email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  className="input input-bordered w-full"
+                  placeholder="Email"
+                  value={editingPlayer.email}
+                  onChange={(e) =>
+                    setEditingPlayer({ ...editingPlayer, email: e.target.value })
+                  }
+                />
+              </div>
               <div className="modal-action">
                 <button
                   type="button"

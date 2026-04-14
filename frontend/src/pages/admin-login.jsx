@@ -38,11 +38,14 @@ export default function AdminLogin() {
         {message && <div className="alert alert-error mb-4">{message}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-control mb-4">
-            <label className="label">
+            <label className="label" htmlFor="admin-login-email">
               <span className="label-text">Email</span>
             </label>
             <input
+              id="admin-login-email"
+              name="email"
               type="email"
+              autoComplete="username"
               className="input input-bordered"
               placeholder="admin@example.com"
               value={credentials.email}
@@ -53,12 +56,15 @@ export default function AdminLogin() {
             />
           </div>
           <div className="form-control mb-6">
-            <label className="label">
+            <label className="label" htmlFor="admin-login-password">
               <span className="label-text">Password</span>
             </label>
             <label className="input input-bordered flex items-center gap-2">
               <input
+                id="admin-login-password"
+                name="password"
                 type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
                 className="grow"
                 placeholder="Password"
                 value={credentials.password}

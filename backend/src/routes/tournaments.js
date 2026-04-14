@@ -1323,6 +1323,15 @@ router.post(
       if (!mongoose.isValidObjectId(tournamentId) || !mongoose.isValidObjectId(playerId)) {
         return res.status(400).json({ message: "Invalid tournament or player ID" });
       }
+      const fromNameNorm = String(fromTeamName || "").trim().toLowerCase();
+      const toNameNorm = String(toTeamName || "").trim().toLowerCase();
+      if (!fromNameNorm || !toNameNorm) {
+        return res.status(400).json({ message: "Both source and destination team names are required" });
+      }
+      if (fromNameNorm === toNameNorm) {
+        return res.status(400).json({ message: "Source and destination teams must be different" });
+      }
+
       const tournament = await Tournament.findById(tournamentId);
       if (!tournament) return res.status(404).json({ message: "Tournament not found" });
       if (tournament.type !== "league") {
@@ -1331,22 +1340,55 @@ router.post(
           .json({ message: "Player transfer is only available for league tournaments" });
       }
 
-      const fromTeam = (tournament.teams || []).find(
-        (team) => String(team?.name || "").trim().toLowerCase() === String(fromTeamName || "").trim().toLowerCase(),
-      );
-      const toTeam = (tournament.teams || []).find(
-        (team) => String(team?.name || "").trim().toLowerCase() === String(toTeamName || "").trim().toLowerCase(),
-      );
-      if (!fromTeam || !toTeam) {
-        return res.status(400).json({ message: "Both source and destination teams are required" });
+      const teamEntryName = (entry) =>
+        typeof entry === "string"
+          ? String(entry).trim()
+          : String(entry?.name || "").trim();
+
+      const findTeamIndex = (normName) =>
+        (tournament.teams || []).findIndex(
+          (team) => teamEntryName(team).toLowerCase() === normName,
+        );
+
+      const fromIdx = findTeamIndex(fromNameNorm);
+      const toIdx = findTeamIndex(toNameNorm);
+      if (fromIdx === -1 || toIdx === -1) {
+        return res.status(400).json({ message: "Could not find one or both teams on this tournament" });
+      }
+
+      const ensureTeamObject = (idx) => {
+        const raw = tournament.teams[idx];
+        if (typeof raw === "string") {
+          const name = String(raw).trim();
+          const next = { name, players: [], captain: null };
+          tournament.teams[idx] = next;
+          return next;
+        }
+        if (!raw || typeof raw !== "object") {
+          return null;
+        }
+        if (!Array.isArray(raw.players)) raw.players = raw.players || [];
+        return raw;
+      };
+
+      const fromTeam = ensureTeamObject(fromIdx);
+      const toTeam = ensureTeamObject(toIdx);
+      if (!fromTeam?.name || !toTeam?.name) {
+        return res.status(400).json({ message: "Invalid team data on this tournament" });
       }
 
       const pid = playerId.toString();
+      const onFrom = (fromTeam.players || []).some((id) => id.toString() === pid);
+      if (!onFrom) {
+        return res.status(400).json({ message: "Player is not listed on the source team" });
+      }
+
       fromTeam.players = (fromTeam.players || []).filter((id) => id.toString() !== pid);
       if (!(toTeam.players || []).some((id) => id.toString() === pid)) {
         toTeam.players = [...(toTeam.players || []), new mongoose.Types.ObjectId(pid)];
       }
       if (fromTeam.captain && fromTeam.captain.toString() === pid) fromTeam.captain = null;
+      tournament.markModified("teams");
       await tournament.save();
 
       await Match.updateMany(
