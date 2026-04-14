@@ -116,6 +116,33 @@ export default function AdminPanel() {
   const tournamentTeamOptions = (selectedTournamentDetails?.teams || [])
     .map((team) => (typeof team === "string" ? team : team?.name))
     .filter(Boolean);
+  const selectedFromTeam = (selectedTournamentDetails?.teams || []).find((team) => {
+    const teamName = typeof team === "string" ? team : team?.name;
+    return (
+      String(teamName || "").trim().toLowerCase() ===
+      String(transferForm.fromTeamName || "").trim().toLowerCase()
+    );
+  });
+  const transferPlayerOptions = (() => {
+    if (!selectedFromTeam || typeof selectedFromTeam === "string") return [];
+    const teamPlayers = Array.isArray(selectedFromTeam.players)
+      ? selectedFromTeam.players
+      : [];
+    return teamPlayers
+      .map((playerRef) => {
+        const playerId =
+          typeof playerRef === "string"
+            ? playerRef
+            : playerRef?._id || playerRef?.id || "";
+        const player = players.find((item) => String(item._id) === String(playerId));
+        if (!player) return null;
+        return {
+          _id: player._id,
+          label: `${player.name} (${player.playerId})`,
+        };
+      })
+      .filter(Boolean);
+  })();
 
   useEffect(() => {
     if (!getToken() || !user) {
@@ -1553,19 +1580,34 @@ export default function AdminPanel() {
                 <div className="rounded-lg border border-white/10 bg-base-100/40 p-4 space-y-3">
                   <h4 className="font-semibold">League Player Transfer</h4>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                    <input
-                      className="input input-bordered input-sm"
-                      placeholder="Player Mongo ID"
+                    <select
+                      className="select select-bordered select-sm"
                       value={transferForm.playerId}
                       onChange={(e) =>
                         setTransferForm({ ...transferForm, playerId: e.target.value })
                       }
-                    />
+                      disabled={!transferForm.fromTeamName}
+                    >
+                      <option value="">
+                        {transferForm.fromTeamName
+                          ? "Select player"
+                          : "Select from team first"}
+                      </option>
+                      {transferPlayerOptions.map((player) => (
+                        <option key={`transfer-player-${player._id}`} value={player._id}>
+                          {player.label}
+                        </option>
+                      ))}
+                    </select>
                     <select
                       className="select select-bordered select-sm"
                       value={transferForm.fromTeamName}
                       onChange={(e) =>
-                        setTransferForm({ ...transferForm, fromTeamName: e.target.value })
+                        setTransferForm({
+                          ...transferForm,
+                          fromTeamName: e.target.value,
+                          playerId: "",
+                        })
                       }
                     >
                       <option value="">From team</option>
