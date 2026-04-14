@@ -1,8 +1,9 @@
-﻿import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiUrl } from "../lib/config.js";
 import { useAuth } from "../lib/auth.jsx";
 import { pushNotification, pushToast } from "../lib/ui-feedback.js";
+import { createAuthedClient } from "../lib/api-client.js";
 import {
   Plus,
   Trophy,
@@ -13,6 +14,7 @@ import {
   Play,
   Square,
   Goal,
+  Pencil,
 } from "lucide-react";
 
 export default function AdminPanel() {
@@ -99,7 +101,13 @@ export default function AdminPanel() {
     scoreTeamA: "",
     scoreTeamB: "",
   });
-  const [playerEdit, setPlayerEdit] = useState({ playerMongoId: "", name: "", email: "" });
+  const [showEditPlayerModal, setShowEditPlayerModal] = useState(false);
+  const [editingPlayer, setEditingPlayer] = useState({
+    _id: "",
+    name: "",
+    email: "",
+  });
+  const [activeAdminTab, setActiveAdminTab] = useState("all");
   const [transferForm, setTransferForm] = useState({
     playerId: "",
     fromTeamName: "",
@@ -116,27 +124,20 @@ export default function AdminPanel() {
     }
   }, [getToken, user, navigate]);
 
+  const authClient = useMemo(
+    () =>
+      createAuthedClient({
+        getToken,
+        onUnauthorized: () => {
+          logout();
+          navigate("/admin-login");
+        },
+      }),
+    [getToken, logout, navigate],
+  );
+
   const fetchWithAuth = async (url, options = {}) => {
-    const token = getToken();
-    if (!token) throw new Error("No auth token");
-    const response = await fetch(apiUrl(url), {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        ...options.headers,
-      },
-    });
-    if (response.status === 401) {
-      logout();
-      navigate("/admin-login");
-      throw new Error("Session expired");
-    }
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(data.message || "Request failed");
-    }
-    return response.json();
+    return authClient.request(url, options);
   };
 
   const notify = (text, type = "info") => {
@@ -175,15 +176,44 @@ export default function AdminPanel() {
     }
   };
 
-  const handleOpenEditTeams = (tournament) => {
+  const normalizeTeamPlayerIds = (team) => {
+    if (!team) return [];
+    if (Array.isArray(team.players)) {
+      return team.players
+        .map((player) => {
+          if (typeof player === "string") return player;
+          if (player && typeof player === "object") {
+            return player._id || player.id || "";
+          }
+          return "";
+        })
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const handleOpenEditTeams = async (tournament) => {
+    const tournamentId = tournament?._id || tournament?.id;
+    let teamsForEdit = [];
+    if (tournamentId) {
+      try {
+        const data = await fetchWithAuth(`/tournaments/${tournamentId}/progression`);
+        teamsForEdit = (data?.tournament?.teams || []).map((team) => ({
+          name: team?.name || "",
+          players: normalizeTeamPlayerIds(team),
+        }));
+      } catch (_error) {
+        teamsForEdit = [];
+      }
+    }
+    if (!teamsForEdit.length) {
+      teamsForEdit = (tournament?.teams || []).map((team) => ({
+        name: typeof team === "string" ? team : team?.name || "",
+        players: normalizeTeamPlayerIds(team),
+      }));
+    }
     setEditingTournament(tournament);
-    // initialize tempTeams from tournament.teams if available
-    setTempTeams(
-      (tournament.teams || []).map((t) => ({
-        name: t.name || t,
-        players: t.players || [],
-      })),
-    );
+    setTempTeams(teamsForEdit);
     setShowEditTeamsModal(true);
   };
 
@@ -201,10 +231,10 @@ export default function AdminPanel() {
       setShowEditTeamsModal(false);
       setEditingTournament(null);
       setTempTeams([]);
-      setMessage("✅ Tournament teams updated");
+      setMessage("Tournament teams updated.");
       setMessageType("success");
     } catch (error) {
-      setMessage(`❌ ${error.message}`);
+      setMessage(`Could not update tournament teams: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -250,10 +280,10 @@ export default function AdminPanel() {
       setShowAddPlayerModal(false);
       setNewPlayer({ name: "", playerId: "", email: "", position: "" });
       loadPlayers();
-      setMessage(" Player added!");
+      setMessage("Player added.");
       setMessageType("success");
     } catch (error) {
-      setMessage(` ${error.message}`);
+      setMessage(`Could not add player: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -264,7 +294,7 @@ export default function AdminPanel() {
     if (tournamentStep === 1) {
       // Validate basic info and move to step 2
       if (!newTournament.name.trim()) {
-        setMessage("❌ Tournament name is required");
+        setMessage("Tournament name is required.");
         setMessageType("error");
         return;
       }
@@ -275,7 +305,7 @@ export default function AdminPanel() {
     if (tournamentStep === 2) {
       // Validate teams and move to step 3 (or submit for non-league)
       if (tempTeams.length === 0) {
-        setMessage("❌ Add at least one team");
+        setMessage("Add at least one team.");
         setMessageType("error");
         return;
       }
@@ -337,13 +367,13 @@ export default function AdminPanel() {
 
   const addTeamToTournament = () => {
     if (!newTeam.name.trim()) {
-      setMessage("❌ Team name is required");
+      setMessage("Team name is required.");
       setMessageType("error");
       return;
     }
 
     if (newTeam.players.length < 3) {
-      setMessage("❌ Team must have at least 3 players");
+      setMessage("Team must have at least 3 players.");
       setMessageType("error");
       return;
     }
@@ -351,7 +381,7 @@ export default function AdminPanel() {
     if (
       tempTeams.some((t) => t.name.toLowerCase() === newTeam.name.toLowerCase())
     ) {
-      setMessage("❌ Team already added");
+      setMessage("Team already exists.");
       setMessageType("error");
       return;
     }
@@ -361,7 +391,7 @@ export default function AdminPanel() {
       { ...newTeam, players: newTeam.players || [] },
     ]);
     setNewTeam({ name: "", players: [] });
-    setMessage("✅ Team added!");
+    setMessage("Team added.");
     setMessageType("success");
   };
 
@@ -546,10 +576,10 @@ export default function AdminPanel() {
       // Reload data
       await Promise.all([loadStats(), loadPlayers(), loadTournaments()]);
       setHasSampleData(true);
-      setMessage("✅ Sample data created successfully!");
+      setMessage("Sample data created.");
       setMessageType("success");
     } catch (error) {
-      setMessage(`❌ Error creating sample data: ${error.message}`);
+      setMessage(`Could not create sample data: ${error.message}`);
       setMessageType("error");
     } finally {
       setCreatingData(false);
@@ -606,19 +636,19 @@ export default function AdminPanel() {
   const handleCreateMatch = async (e) => {
     e.preventDefault();
     if (!newMatch.teamAName || !newMatch.teamBName) {
-      setMessage("❌ Please enter both team names");
+      setMessage("Please enter both team names.");
       setMessageType("error");
       return;
     }
 
     if (newMatch.teamAPlayers.length < 3) {
-      setMessage("❌ Team A needs at least 3 players");
+      setMessage("Team A needs at least 3 players.");
       setMessageType("error");
       return;
     }
 
     if (newMatch.teamBPlayers.length < 3) {
-      setMessage("❌ Team B needs at least 3 players");
+      setMessage("Team B needs at least 3 players.");
       setMessageType("error");
       return;
     }
@@ -647,10 +677,10 @@ export default function AdminPanel() {
         teamBPlayers: [],
       });
       await loadLiveMatches();
-      setMessage("✅ Match created and started!");
+      setMessage("Match created and started.");
       setMessageType("success");
     } catch (error) {
-      setMessage(`❌ ${error.message}`);
+      setMessage(`Could not create match: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -697,7 +727,7 @@ export default function AdminPanel() {
         ),
       );
     } catch (error) {
-      setMessage(`❌ ${error.message}`);
+      setMessage(`Could not load tournament details: ${error.message}`);
       setMessageType("error");
       setSelectedTournamentDetails(null);
       setTournamentFixtures([]);
@@ -714,7 +744,7 @@ export default function AdminPanel() {
   const handleGenerateTournamentFixtures = async () => {
     const tournamentId = selectedTournament?._id || selectedTournament?.id;
     if (!tournamentId) {
-      setMessage("❌ Select a tournament first");
+      setMessage("Select a tournament first.");
       setMessageType("error");
       return;
     }
@@ -736,10 +766,10 @@ export default function AdminPanel() {
         loadTournamentDetails(tournamentId),
         loadLiveMatches(),
       ]);
-      setMessage(`✅ ${data.matchCount || 0} tournament fixtures generated`);
+      setMessage(`${data.matchCount || 0} tournament fixtures generated.`);
       setMessageType("success");
     } catch (error) {
-      setMessage(`❌ ${error.message}`);
+      setMessage(`Could not generate fixtures: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -757,10 +787,10 @@ export default function AdminPanel() {
         ),
         loadLiveMatches(),
       ]);
-      setMessage("✅ Tournament match started");
+      setMessage("Tournament match started.");
       setMessageType("success");
     } catch (error) {
-      setMessage(`❌ ${error.message}`);
+      setMessage(`Could not start tournament match: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -777,10 +807,10 @@ export default function AdminPanel() {
         loadTournaments(),
         loadTournamentDetails(tournamentId),
       ]);
-      setMessage(`✅ Tournament set to ${tournamentStatusDraft}`);
+      setMessage(`Tournament status set to ${tournamentStatusDraft}.`);
       setMessageType("success");
     } catch (error) {
-      setMessage(`❌ ${error.message}`);
+      setMessage(`Could not update tournament status: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -796,10 +826,10 @@ export default function AdminPanel() {
       await loadTournamentDetails(
         selectedTournament?._id || selectedTournament?.id,
       );
-      setMessage("✅ Fixture schedule updated");
+      setMessage("Fixture schedule updated.");
       setMessageType("success");
     } catch (error) {
-      setMessage(`❌ ${error.message}`);
+      setMessage(`Could not update fixture schedule: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -809,7 +839,7 @@ export default function AdminPanel() {
     if (!tournamentId) return;
 
     if (!manualFixtureForm.teamAName || !manualFixtureForm.teamBName) {
-      setMessage("❌ Select both teams for the fixture");
+      setMessage("Select both teams for the fixture.");
       setMessageType("error");
       return;
     }
@@ -817,7 +847,7 @@ export default function AdminPanel() {
       manualFixtureForm.status === "finished" &&
       (manualFixtureForm.scoreTeamA === "" || manualFixtureForm.scoreTeamB === "")
     ) {
-      setMessage("❌ Enter the final score for an old match record");
+      setMessage("Enter the final score for an old match record.");
       setMessageType("error");
       return;
     }
@@ -848,7 +878,7 @@ export default function AdminPanel() {
       );
       setMessageType("success");
     } catch (error) {
-      setMessage(`❌ ${error.message}`);
+      setMessage(`Could not create fixture: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -893,17 +923,29 @@ export default function AdminPanel() {
     }
   };
 
-  const handleEditPlayer = async () => {
-    if (!playerEdit.playerMongoId) return;
+  const openPlayerEdit = (player) => {
+    setEditingPlayer({
+      _id: player?._id || "",
+      name: player?.name || "",
+      email: player?.email || "",
+    });
+    setShowEditPlayerModal(true);
+  };
+
+  const handleEditPlayer = async (e) => {
+    if (e?.preventDefault) e.preventDefault();
+    if (!editingPlayer._id) return;
     try {
-      await fetchWithAuth(`/players/${playerEdit.playerMongoId}`, {
+      await fetchWithAuth(`/players/${editingPlayer._id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          name: playerEdit.name,
-          email: playerEdit.email,
+          name: editingPlayer.name,
+          email: editingPlayer.email,
         }),
       });
       await loadPlayers();
+      setShowEditPlayerModal(false);
+      setEditingPlayer({ _id: "", name: "", email: "" });
       notify("Player updated", "success");
     } catch (error) {
       notify(error.message, "error");
@@ -981,51 +1023,100 @@ export default function AdminPanel() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          {
-            title: "Matches",
-            value: stats.totalMatches || 0,
-            icon: "",
-            color: "text-primary",
-          },
-          {
-            title: "Players",
-            value: players.length,
-            icon: "",
-            color: "text-success",
-          },
-          {
-            title: "Live",
-            value: tournaments.filter((t) => t.status === "live").length,
-            icon: "",
-            color: "text-warning",
-          },
-          {
-            title: "Teams",
-            value: stats.totalTeams || 0,
-            icon: "",
-            color: "text-info",
-          },
-        ].map((s) => (
-          <div
-            key={s.title}
-            className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-5"
-          >
-            <div className="flex justify-between">
-              <div>
-                <p className="text-xs opacity-60">{s.title}</p>
-                <p className={`text-3xl font-mono font-bold mt-2 ${s.color}`}>
-                  {s.value}
-                </p>
-              </div>
-              <span className="text-3xl">{s.icon}</span>
-            </div>
+      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-sm font-semibold">Quick Actions</p>
+            <p className="text-xs opacity-60">Jump to common admin tasks faster.</p>
           </div>
-        ))}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn btn-sm btn-success" onClick={() => setShowAddPlayerModal(true)}>
+              Add Player
+            </button>
+            <button type="button" className="btn btn-sm btn-warning" onClick={() => setShowAddTournamentModal(true)}>
+              Create Tournament
+            </button>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => setActiveAdminTab("live")}>
+              Go Live Matches
+            </button>
+            <button type="button" className="btn btn-sm btn-outline" onClick={() => setActiveAdminTab("tournaments")}>
+              Go Tournament Control
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="tabs tabs-boxed w-fit">
+        <button type="button" className={`tab ${activeAdminTab === "all" ? "tab-active" : ""}`} onClick={() => setActiveAdminTab("all")}>
+          All
+        </button>
+        <button type="button" className={`tab ${activeAdminTab === "overview" ? "tab-active" : ""}`} onClick={() => setActiveAdminTab("overview")}>
+          Overview
+        </button>
+        <button type="button" className={`tab ${activeAdminTab === "tournaments" ? "tab-active" : ""}`} onClick={() => setActiveAdminTab("tournaments")}>
+          Tournament Control
+        </button>
+        <button type="button" className={`tab ${activeAdminTab === "live" ? "tab-active" : ""}`} onClick={() => setActiveAdminTab("live")}>
+          Live Matches
+        </button>
+      </div>
+      <p className="text-sm opacity-70 -mt-4">
+        {activeAdminTab === "all" && "All sections in one view for full control."}
+        {activeAdminTab === "overview" &&
+          "Manage players and tournaments quickly from summary tables."}
+        {activeAdminTab === "tournaments" &&
+          "Generate fixtures, manage tournament status, history, and transfers."}
+        {activeAdminTab === "live" &&
+          "Monitor active matches and control live match operations."}
+      </p>
+
+      {(activeAdminTab === "all" || activeAdminTab === "overview") && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              {
+                title: "Matches",
+                value: stats.totalMatches || 0,
+                icon: "",
+                color: "text-primary",
+              },
+              {
+                title: "Players",
+                value: players.length,
+                icon: "",
+                color: "text-success",
+              },
+              {
+                title: "Live",
+                value: tournaments.filter((t) => t.status === "live").length,
+                icon: "",
+                color: "text-warning",
+              },
+              {
+                title: "Teams",
+                value: stats.totalTeams || 0,
+                icon: "",
+                color: "text-info",
+              },
+            ].map((s) => (
+              <div
+                key={s.title}
+                className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-5"
+              >
+                <div className="flex justify-between">
+                  <div>
+                    <p className="text-xs opacity-60">{s.title}</p>
+                    <p className={`text-3xl font-mono font-bold mt-2 ${s.color}`}>
+                      {s.value}
+                    </p>
+                  </div>
+                  <span className="text-3xl">{s.icon}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
           <h2 className="text-2xl font-bold mb-4">
             Players ({players.length})
@@ -1043,6 +1134,7 @@ export default function AdminPanel() {
                 <tr>
                   <th>Name</th>
                   <th>ID</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -1050,42 +1142,27 @@ export default function AdminPanel() {
                   <tr key={p._id}>
                     <td>{p.name}</td>
                     <td className="font-mono text-xs">{p.playerId}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-outline"
+                        onClick={() => openPlayerEdit(p)}
+                      >
+                        <Pencil className="w-3 h-3" />
+                        Edit
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {!players.length && (
                   <tr>
-                    <td colSpan="2" className="text-center py-8 opacity-50">
+                    <td colSpan="3" className="text-center py-8 opacity-50">
                       No players
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-2">
-            <input
-              className="input input-bordered input-sm"
-              placeholder="Player Mongo ID"
-              value={playerEdit.playerMongoId}
-              onChange={(e) =>
-                setPlayerEdit({ ...playerEdit, playerMongoId: e.target.value })
-              }
-            />
-            <input
-              className="input input-bordered input-sm"
-              placeholder="New name"
-              value={playerEdit.name}
-              onChange={(e) => setPlayerEdit({ ...playerEdit, name: e.target.value })}
-            />
-            <input
-              className="input input-bordered input-sm"
-              placeholder="New email"
-              value={playerEdit.email}
-              onChange={(e) => setPlayerEdit({ ...playerEdit, email: e.target.value })}
-            />
-            <button type="button" className="btn btn-info btn-sm" onClick={handleEditPlayer}>
-              Edit Player
-            </button>
           </div>
         </div>
 
@@ -1139,9 +1216,12 @@ export default function AdminPanel() {
             </table>
           </div>
         </div>
-      </div>
+          </div>
+        </>
+      )}
 
-      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
+      {(activeAdminTab === "all" || activeAdminTab === "tournaments") && (
+        <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
           <div>
             <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -1741,10 +1821,11 @@ export default function AdminPanel() {
             )}
           </div>
         </div>
-      </div>
+        </div>
+      )}
 
-      {/* Match Management Section */}
-      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
+      {(activeAdminTab === "all" || activeAdminTab === "live") && (
+        <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-2xl font-bold flex items-center gap-2">
             <Goal className="w-6 h-6 text-success" />
@@ -1896,7 +1977,8 @@ export default function AdminPanel() {
             <p>No live matches. Start one to begin!</p>
           </div>
         )}
-      </div>
+        </div>
+      )}
 
       {/* Create Match Modal */}
       {showCreateMatchModal && (
@@ -2168,6 +2250,65 @@ export default function AdminPanel() {
                 </button>
                 <button type="submit" className="btn btn-success">
                   Add
+                </button>
+              </div>
+            </form>
+          </dialog>
+        </>
+      )}
+
+      {showEditPlayerModal && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setShowEditPlayerModal(false)}
+          ></div>
+          <dialog open className="modal modal-open z-50">
+            <form
+              className="modal-box max-w-md space-y-4"
+              onSubmit={handleEditPlayer}
+            >
+              <h3 className="font-bold text-lg">Edit Player</h3>
+              <div>
+                <label htmlFor="edit-player-name" className="sr-only">
+                  Player name
+                </label>
+                <input
+                  id="edit-player-name"
+                  type="text"
+                  placeholder="Name"
+                  className="input input-bordered w-full"
+                  value={editingPlayer.name}
+                  onChange={(e) =>
+                    setEditingPlayer({ ...editingPlayer, name: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label htmlFor="edit-player-email" className="sr-only">
+                  Player email
+                </label>
+                <input
+                  id="edit-player-email"
+                  type="email"
+                  placeholder="Email"
+                  className="input input-bordered w-full"
+                  value={editingPlayer.email}
+                  onChange={(e) =>
+                    setEditingPlayer({ ...editingPlayer, email: e.target.value })
+                  }
+                />
+              </div>
+              <div className="modal-action gap-3">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setShowEditPlayerModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-info">
+                  Save
                 </button>
               </div>
             </form>

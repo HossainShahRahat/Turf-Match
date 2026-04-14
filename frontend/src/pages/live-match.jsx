@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 import { Activity, Plus, ShieldAlert, Trophy } from "lucide-react";
-import { apiUrl, socketBaseUrl } from "../lib/config.js";
+import { socketBaseUrl } from "../lib/config.js";
 import { useAuth } from "../lib/auth.jsx";
+import { apiRequest } from "../lib/api-client.js";
 
 export default function LiveMatch() {
   const { user, getToken } = useAuth();
@@ -46,37 +47,29 @@ export default function LiveMatch() {
   const handleAddGoal = async (e) => {
     e.preventDefault();
     if (!selectedMatch || !selectedPlayerId) {
-      setMessage("Please select a player");
+      setMessage("Select a player first.");
       setMessageType("error");
       return;
     }
 
     try {
       const token = getToken();
-      const response = await fetch(apiUrl(`/matches/${selectedMatch._id}/goals`), {
+      const data = await apiRequest(`/matches/${selectedMatch._id}/goals`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+        token,
+        body: {
           playerId: selectedPlayerId,
           minute: goalMinute || 0,
-        }),
+        },
       });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to add goal");
-      }
 
       syncUpdatedMatch(data.match);
       setShowAddGoalModal(false);
       resetEventForm();
-      setMessage("Goal added successfully!");
+      setMessage("Goal added.");
       setMessageType("success");
     } catch (error) {
-      setMessage(error.message);
+      setMessage(`Could not add goal: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -84,38 +77,30 @@ export default function LiveMatch() {
   const handleAddCard = async (e) => {
     e.preventDefault();
     if (!selectedMatch || !selectedPlayerId) {
-      setMessage("Please select a player");
+      setMessage("Select a player first.");
       setMessageType("error");
       return;
     }
 
     try {
       const token = getToken();
-      const response = await fetch(apiUrl(`/matches/${selectedMatch._id}/cards`), {
+      const data = await apiRequest(`/matches/${selectedMatch._id}/cards`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+        token,
+        body: {
           playerId: selectedPlayerId,
           minute: cardMinute || 0,
           type: cardType,
-        }),
+        },
       });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to add card");
-      }
 
       syncUpdatedMatch(data.match);
       setShowAddCardModal(false);
       resetEventForm();
-      setMessage(`${cardType === "yellow" ? "Yellow" : "Red"} card added successfully!`);
+      setMessage(`${cardType === "yellow" ? "Yellow" : "Red"} card added.`);
       setMessageType("success");
     } catch (error) {
-      setMessage(error.message);
+      setMessage(`Could not add card: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -325,28 +310,23 @@ export default function LiveMatch() {
       setMessage("Loading live matches...");
       setMessageType("info");
       try {
-        const response = await fetch(apiUrl("/matches/schedule/upcoming"));
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.message || "Failed to load matches");
-        }
+        const data = await apiRequest("/matches/schedule/upcoming");
 
         const live = (data.matches || []).filter((m) => m.status === "live");
         setLiveMatches(live);
 
         if (live.length === 0) {
-          setMessage("No live matches currently. Check back soon!");
+          setMessage("No live matches right now. Check again soon.");
           setMessageType("warning");
         } else {
           setMessage(
-            `Found ${live.length} live match${live.length !== 1 ? "es" : ""}`,
+            `Live now: ${live.length} match${live.length !== 1 ? "es" : ""}.`,
           );
           setMessageType("success");
           setSelectedMatch(live[0]);
         }
       } catch (error) {
-        setMessage(error.message);
+        setMessage(`Could not load live matches: ${error.message}`);
         setMessageType("error");
         setLiveMatches([]);
       }
@@ -385,7 +365,7 @@ export default function LiveMatch() {
 
       if (selectedMatch?._id === matchId) {
         setSelectedMatch(null);
-        setMessage(`Match has been ${status}!`);
+        setMessage(`Match status updated to ${status}.`);
         setMessageType("success");
       }
     });
@@ -402,7 +382,27 @@ export default function LiveMatch() {
           <Activity className="w-8 h-8 text-success animate-pulse" />
           Live Matches
         </h1>
-        <p className="text-lg opacity-70">Real-time updates via WebSocket</p>
+        <p className="text-lg opacity-70">Real-time match updates</p>
+      </div>
+
+      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+        <div className="card-body p-5">
+          <h2 className="card-title text-lg">How to use this page</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">Select a live match</p>
+              <p className="opacity-75">Click a live match card to open match details.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">Track events in real time</p>
+              <p className="opacity-75">Goals, cards, and score update automatically.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">Admin tools</p>
+              <p className="opacity-75">Add Goal/Add Card buttons appear only for admin login.</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {message && (
@@ -454,7 +454,7 @@ export default function LiveMatch() {
 
           {selectedMatch && (
             <div className="border-t border-white/10 pt-8">
-              <h2 className="text-2xl font-bold mb-6">Match Details</h2>
+              <h2 className="text-2xl font-bold mb-6">Live Match Details</h2>
               {renderMatch(selectedMatch)}
             </div>
           )}

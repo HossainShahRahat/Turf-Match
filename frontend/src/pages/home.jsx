@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { apiUrl } from "../lib/config.js";
+import { useAuth } from "../lib/auth.jsx";
+import { apiRequest } from "../lib/api-client.js";
 
 export default function Home() {
+  const { user, getToken } = useAuth();
+  const isAdmin = !!user;
   const [upcoming, setUpcoming] = useState([]);
   const [finished, setFinished] = useState([]);
   const [tournaments, setTournaments] = useState([]);
-  const [message, setMessage] = useState("Loading schedule…");
+  const [pulseMessage, setPulseMessage] = useState("");
+  const [message, setMessage] = useState("Loading latest matches and tournaments...");
   const [messageType, setMessageType] = useState("info");
 
   function formatWhen(iso) {
@@ -84,26 +88,23 @@ export default function Home() {
   }
 
   useEffect(() => {
+    const pulseOptions = [
+      "Matchday mood: high energy and clean tackles.",
+      "Fans are ready. Keep an eye on live score swings.",
+      "Today is perfect for discovering a new top scorer.",
+      "Quick tip: check tournament details after each result.",
+    ];
+    setPulseMessage(
+      pulseOptions[Math.floor(Math.random() * pulseOptions.length)],
+    );
+
     const load = async () => {
       try {
-        const [upRes, finRes, tourRes] = await Promise.all([
-          fetch(apiUrl("/matches/schedule/upcoming")),
-          fetch(apiUrl("/matches/schedule/recent-results")),
-          fetch(apiUrl("/tournaments")),
+        const [upcomingData, finishedData, toursData] = await Promise.all([
+          apiRequest("/matches/schedule/upcoming"),
+          apiRequest("/matches/schedule/recent-results"),
+          apiRequest("/tournaments"),
         ]);
-
-        const upcomingData = await upRes.json();
-        const finishedData = await finRes.json();
-        const toursData = await tourRes.json();
-
-        if (!upRes.ok)
-          throw new Error(
-            upcomingData.message || "Failed to load upcoming matches",
-          );
-        if (!finRes.ok)
-          throw new Error(finishedData.message || "Failed to load results");
-        if (!tourRes.ok)
-          throw new Error(toursData.message || "Failed to load tournaments");
 
         setUpcoming(upcomingData.matches || []);
         setFinished(finishedData.matches || []);
@@ -118,6 +119,25 @@ export default function Home() {
     load();
   }, []);
 
+  const handleDeleteRecentResult = async (matchId) => {
+    const token = getToken();
+    if (!token) return;
+    const ok = window.confirm("Delete this result from recent history?");
+    if (!ok) return;
+    try {
+      await apiRequest(`/matches/${matchId}`, {
+        method: "DELETE",
+        token,
+      });
+      setFinished((prev) => prev.filter((match) => match._id !== matchId));
+      setMessage("Result removed from recent history.");
+      setMessageType("success");
+    } catch (error) {
+      setMessage(`Could not delete result: ${error.message}`);
+      setMessageType("error");
+    }
+  };
+
   return (
     <div className="w-full space-y-8">
       {/* Header */}
@@ -127,6 +147,41 @@ export default function Home() {
           Browse live scores, schedules, and tournament standings. No login
           required.
         </p>
+      </div>
+      <div className="alert alert-info/80 shadow-sm">
+        <span>🎉 {pulseMessage}</span>
+      </div>
+
+      {/* Quick guide for non-admin users */}
+      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+        <div className="card-body p-5">
+          <h2 className="card-title text-lg">How to use Turf Match</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">1) Check match status</p>
+              <p className="opacity-75">
+                <span className="badge badge-warning badge-xs mr-1">upcoming</span>
+                Not started,
+                <span className="badge badge-success badge-xs mx-1">live</span>
+                currently running,
+                <span className="badge badge-secondary badge-xs ml-1">finished</span>
+                ended.
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">2) Follow live matches</p>
+              <p className="opacity-75">
+                Open any live/upcoming match to see score updates and events.
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">3) Explore tournaments</p>
+              <p className="opacity-75">
+                Use the tournament cards to view standings, fixtures, and results.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Message Alert */}
@@ -183,7 +238,7 @@ export default function Home() {
                         className="btn btn-sm btn-primary mt-2"
                         href={`/live-match?matchId=${id}`}
                       >
-                        View Live Score →
+                        View Live Match →
                       </a>
                     </li>
                   );
@@ -225,8 +280,17 @@ export default function Home() {
                         </div>
                       </div>
                       <a className="btn btn-sm btn-ghost" href={`/match/${id}`}>
-                        View Match Details →
+                        Match Details →
                       </a>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-error btn-outline"
+                          onClick={() => handleDeleteRecentResult(id)}
+                        >
+                          Delete
+                        </button>
+                      )}
                     </li>
                   );
                 })}
@@ -279,7 +343,7 @@ export default function Home() {
                     className="btn btn-primary btn-sm w-full"
                     href={`/tournament?tournamentId=${t._id || t.id}`}
                   >
-                    View Tournament →
+                    Tournament Details →
                   </a>
                 </div>
               ))}

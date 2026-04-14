@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { apiUrl } from "../lib/config.js";
 import { Trophy } from "lucide-react";
+import { apiRequest } from "../lib/api-client.js";
 
 export default function Tournament() {
   const [allTournaments, setAllTournaments] = useState([]);
@@ -186,26 +186,22 @@ export default function Tournament() {
       setMessage("Loading tournaments...");
       setMessageType("info");
       try {
-        const response = await fetch(apiUrl("/tournaments"));
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.message || "Failed to load tournaments");
-        }
+        const data = await apiRequest("/tournaments");
         const tournaments = data.tournaments || [];
         setAllTournaments(tournaments);
         if (tournaments.length === 0) {
-          setMessage("No tournaments available yet.");
+          setMessage("No tournaments are available yet.");
           setMessageType("warning");
         } else {
           setMessage(
-            `Loaded ${tournaments.length} tournament${tournaments.length !== 1 ? "s" : ""}`,
+            `Loaded ${tournaments.length} tournament${tournaments.length !== 1 ? "s" : ""}.`,
           );
           setMessageType("success");
           setSelectedTournament(tournaments[0]);
           loadTournamentDetails(tournaments[0]._id || tournaments[0].id);
         }
       } catch (error) {
-        setMessage(error.message);
+        setMessage(`Could not load tournaments: ${error.message}`);
         setMessageType("error");
         setAllTournaments([]);
       }
@@ -216,13 +212,7 @@ export default function Tournament() {
 
   const loadTournamentDetails = async (tournamentId) => {
     try {
-      const response = await fetch(
-        apiUrl(`/tournaments/${tournamentId}/progression`),
-      );
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to load tournament");
-      }
+      const data = await apiRequest(`/tournaments/${tournamentId}/progression`);
       const { tournament, progression, fixtures, topScorers } = data;
       setTournament(tournament);
       setProgression(progression);
@@ -230,7 +220,7 @@ export default function Tournament() {
       setTopScorers(topScorers || []);
     } catch (error) {
       console.error("Tournament details error:", error);
-      setMessage(error.message);
+      setMessage(`Could not load tournament details: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -250,6 +240,26 @@ export default function Tournament() {
         <p className="text-lg opacity-70">
           Browse upcoming, live, and completed tournaments
         </p>
+      </div>
+
+      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+        <div className="card-body p-5">
+          <h2 className="card-title text-lg">How to read this page</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">Pick a tournament card</p>
+              <p className="opacity-75">Click any card above to load full details below.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">Check standings first</p>
+              <p className="opacity-75">Use the scoreboard to see team positions and progress.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">Then view fixtures</p>
+              <p className="opacity-75">Scheduled matches and final results are listed separately.</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {message && (

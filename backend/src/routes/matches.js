@@ -2,6 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import { Match } from "../models/Match.js";
 import { Player } from "../models/Player.js";
+import { Tournament } from "../models/Tournament.js";
 import { requireAdminAuth, requirePlayerAuth } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -372,6 +373,29 @@ router.post("/:matchId/ratings", requirePlayerAuth, async (req, res) => {
     const total = targetRatings.reduce((sum, entry) => sum + entry.score, 0);
     const average = Number((total / targetRatings.length).toFixed(2));
     return res.status(201).json({ message: "Rating submitted", targetPlayerId, averageRatingForThisMatch: average, totalRatingsForThisMatch: targetRatings.length });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete("/:matchId", requireAdminAuth, async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    if (!mongoose.isValidObjectId(matchId)) {
+      return res.status(400).json({ message: "Invalid match ID" });
+    }
+
+    const match = await Match.findById(matchId);
+    if (!match) {
+      return res.status(404).json({ message: "Match not found" });
+    }
+
+    await Promise.all([
+      Match.deleteOne({ _id: match._id }),
+      Tournament.updateMany({ matches: match._id }, { $pull: { matches: match._id } }),
+    ]);
+
+    return res.status(200).json({ message: "Match deleted" });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

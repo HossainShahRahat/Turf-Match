@@ -1,16 +1,27 @@
 import React, { useEffect, useState } from "react";
-import { apiUrl } from "../lib/config.js";
 import { Users, LogIn } from "lucide-react";
 import { useAuth } from "../lib/auth.jsx";
+import { apiRequest } from "../lib/api-client.js";
 
 export default function Players() {
   const [players, setPlayers] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [playerDetails, setPlayerDetails] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingPlayer, setEditingPlayer] = useState({
+    _id: "",
+    name: "",
+    email: "",
+  });
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
+
+  const filteredPlayers = players.filter((player) =>
+    (player?.name || "").toLowerCase().includes(searchTerm.trim().toLowerCase()),
+  );
 
   // Load all players on mount
   useEffect(() => {
@@ -19,29 +30,21 @@ export default function Players() {
       setMessage("Loading players...");
       setMessageType("info");
       try {
-        const response = await fetch(apiUrl("/players"));
-        const data = await response.json();
-        if (!response.ok) {
-          // If admin endpoint fails, just show empty list
-          setPlayers([]);
-          setMessage("Player list not available");
+        const data = await apiRequest("/players");
+        const playerList = data.players || [];
+        setPlayers(playerList);
+        if (playerList.length === 0) {
+          setMessage("No players are registered yet.");
           setMessageType("warning");
         } else {
-          const playerList = data.players || [];
-          setPlayers(playerList);
-          if (playerList.length === 0) {
-            setMessage("No players registered yet");
-            setMessageType("warning");
-          } else {
-            setMessage(
-              `✅ Loaded ${playerList.length} player${playerList.length !== 1 ? "s" : ""}`,
-            );
-            setMessageType("success");
-          }
+          setMessage(
+            `Loaded ${playerList.length} player${playerList.length !== 1 ? "s" : ""}.`,
+          );
+          setMessageType("success");
         }
       } catch (error) {
         setPlayers([]);
-        setMessage(error.message);
+        setMessage(`Could not load players: ${error.message}`);
         setMessageType("error");
       }
       setLoading(false);
@@ -52,21 +55,14 @@ export default function Players() {
   // Load player details when selected
   const loadPlayerDetails = async (playerId) => {
     try {
-      const headers = {};
       const token = localStorage.getItem("token");
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      const response = await fetch(apiUrl(`/players/profile/${playerId}`), {
-        headers,
+      const data = await apiRequest(`/players/profile/${playerId}`, {
+        ...(token ? { token } : {}),
       });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.message || "Failed to load player details");
       setPlayerDetails(data.player);
     } catch (error) {
       setPlayerDetails(null);
-      setMessage(error.message);
+      setMessage(`Could not load player details: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -75,6 +71,76 @@ export default function Players() {
     setSelectedPlayer(player);
     setPlayerDetails(null);
     loadPlayerDetails(player.playerId);
+  };
+
+  const openEditPlayer = (player) => {
+    if (!user) return;
+    setEditingPlayer({
+      _id: player?._id || "",
+      name: player?.name || "",
+      email: player?.email || "",
+    });
+    setShowEditModal(true);
+  };
+
+  const handleAdminEditPlayer = async (e) => {
+    e.preventDefault();
+    if (!editingPlayer._id) return;
+    const token = localStorage.getItem("adminToken");
+    if (!token) {
+      setMessage("Admin session required to edit player.");
+      setMessageType("error");
+      return;
+    }
+
+    try {
+      const data = await apiRequest(`/players/${editingPlayer._id}`, {
+        method: "PATCH",
+        token,
+        body: {
+          name: editingPlayer.name,
+          email: editingPlayer.email,
+        },
+      });
+
+      setPlayers((prev) =>
+        prev.map((player) =>
+          player._id === editingPlayer._id
+            ? {
+                ...player,
+                name: data?.player?.name ?? editingPlayer.name,
+                email: data?.player?.email ?? editingPlayer.email,
+              }
+            : player,
+        ),
+      );
+      if (selectedPlayer?._id === editingPlayer._id) {
+        setSelectedPlayer((prev) =>
+          prev
+            ? {
+                ...prev,
+                name: data?.player?.name ?? editingPlayer.name,
+                email: data?.player?.email ?? editingPlayer.email,
+              }
+            : prev,
+        );
+      }
+      setPlayerDetails((prev) =>
+        prev && prev.playerId === (data?.player?.playerId || prev.playerId)
+          ? {
+              ...prev,
+              name: data?.player?.name ?? prev.name,
+              email: data?.player?.email ?? prev.email,
+            }
+          : prev,
+      );
+      setShowEditModal(false);
+      setMessage("Player profile updated.");
+      setMessageType("success");
+    } catch (error) {
+      setMessage(`Could not update player: ${error.message}`);
+      setMessageType("error");
+    }
   };
 
   return (
@@ -87,8 +153,38 @@ export default function Players() {
         <p className="text-lg opacity-70">
           {user
             ? "View player profiles and stats"
-            : "View all registered players (login to see full details)"}
+            : "View all registered players (player login required for full profile details)"}
         </p>
+      </div>
+
+      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+        <div className="card-body p-5">
+          <h2 className="card-title text-lg">How to use this page</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">Search players</p>
+              <p className="opacity-75">Use the search box to quickly find a player by name.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">Select a player</p>
+              <p className="opacity-75">Click any player card to open that player&apos;s profile section.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-base-200/50">
+              <p className="font-semibold mb-1">Login note</p>
+              <p className="opacity-75">Full private profile data is visible after player login.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-md">
+        <input
+          type="text"
+          className="input input-bordered w-full"
+          placeholder="Search player by name..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
       </div>
 
       {message && (
@@ -104,13 +200,13 @@ export default function Players() {
             <p className="mt-4 opacity-60">Loading players...</p>
           </div>
         </div>
-      ) : players.length > 0 ? (
+      ) : filteredPlayers.length > 0 ? (
         <div className="space-y-6">
           {/* Player selection grid */}
           <div>
             <h2 className="text-xl font-bold mb-4">👥 Select a Player</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {players.map((player) => (
+              {filteredPlayers.map((player) => (
                 <div
                   key={player._id}
                   onClick={() => handlePlayerSelect(player)}
@@ -133,14 +229,26 @@ export default function Players() {
                     <div className="pt-2 flex items-center gap-2 text-xs opacity-60">
                       {user ? (
                         <span className="badge badge-sm badge-success">
-                          Public Data Available
+                          Profile Access Enabled
                         </span>
                       ) : (
                         <span className="badge badge-sm badge-outline">
-                          Login to View Details
+                          Player Login For Full Details
                         </span>
                       )}
                     </div>
+                    {user && (
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-outline mt-2"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditPlayer(player);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -160,6 +268,21 @@ export default function Players() {
                       <h1 className="text-4xl font-bold mb-3">
                         {playerDetails.name}
                       </h1>
+                      {user && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline mb-3"
+                          onClick={() =>
+                            openEditPlayer({
+                              _id: selectedPlayer?._id,
+                              name: playerDetails.name,
+                              email: playerDetails.email,
+                            })
+                          }
+                        >
+                          Edit Player
+                        </button>
+                      )}
                       <div className="space-y-2 text-lg opacity-80">
                         <p>
                           <span className="font-semibold">Player ID:</span>
@@ -232,10 +355,10 @@ export default function Players() {
               <div className="card-body text-center py-12">
                 <LogIn className="w-12 h-12 mx-auto opacity-50 mb-4" />
                 <p className="text-lg opacity-70 mb-4">
-                  Login as a player to view full details
+                  Player login is required to view full details
                 </p>
                 <p className="text-sm opacity-60">
-                  Use your Player ID to login and see complete stats
+                  Use Player Login with your Player ID to access complete stats
                 </p>
               </div>
             </div>
@@ -245,9 +368,55 @@ export default function Players() {
         <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
           <div className="card-body text-center py-12">
             <Users className="w-12 h-12 mx-auto opacity-50 mb-4" />
-            <p className="text-lg opacity-60">No players registered yet</p>
+            <p className="text-lg opacity-60">
+              {players.length ? "No players match your search" : "No players registered yet"}
+            </p>
           </div>
         </div>
+      )}
+
+      {showEditModal && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setShowEditModal(false)}
+          ></div>
+          <dialog open className="modal modal-open z-50">
+            <form className="modal-box max-w-md space-y-4" onSubmit={handleAdminEditPlayer}>
+              <h3 className="font-bold text-lg">Edit Player</h3>
+              <input
+                type="text"
+                className="input input-bordered w-full"
+                placeholder="Name"
+                value={editingPlayer.name}
+                onChange={(e) =>
+                  setEditingPlayer({ ...editingPlayer, name: e.target.value })
+                }
+              />
+              <input
+                type="email"
+                className="input input-bordered w-full"
+                placeholder="Email"
+                value={editingPlayer.email}
+                onChange={(e) =>
+                  setEditingPlayer({ ...editingPlayer, email: e.target.value })
+                }
+              />
+              <div className="modal-action">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setShowEditModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-info">
+                  Save
+                </button>
+              </div>
+            </form>
+          </dialog>
+        </>
       )}
     </div>
   );
