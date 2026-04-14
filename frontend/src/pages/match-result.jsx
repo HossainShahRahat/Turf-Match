@@ -7,7 +7,6 @@ export default function MatchResult() {
   const { user, getToken } = useAuth();
   const { id } = useParams();
   const [match, setMatch] = useState(null);
-  const [reactions, setReactions] = useState({ fire: 0, clap: 0, wow: 0 });
   const [posterUrl, setPosterUrl] = useState("");
   const [posterBusy, setPosterBusy] = useState(false);
   const [posterNote, setPosterNote] = useState("");
@@ -33,22 +32,6 @@ export default function MatchResult() {
       }
     };
     load();
-  }, [id]);
-
-  useEffect(() => {
-    if (!id) return;
-    try {
-      const saved = localStorage.getItem(`tm_reaction_${id}`);
-      if (!saved) return;
-      const parsed = JSON.parse(saved);
-      setReactions({
-        fire: Number(parsed.fire || 0),
-        clap: Number(parsed.clap || 0),
-        wow: Number(parsed.wow || 0),
-      });
-    } catch {
-      setReactions({ fire: 0, clap: 0, wow: 0 });
-    }
   }, [id]);
 
   if (loading)
@@ -153,17 +136,6 @@ export default function MatchResult() {
         card.player?.name || (user ? card.player?.playerId : null) || "Unknown Player",
     })),
   ].sort((a, b) => a.minute - b.minute);
-
-  const voteReaction = (key) => {
-    const next = {
-      ...reactions,
-      [key]: Number(reactions[key] || 0) + 1,
-    };
-    setReactions(next);
-    if (id) {
-      localStorage.setItem(`tm_reaction_${id}`, JSON.stringify(next));
-    }
-  };
 
   const handleShare = async () => {
     const scoreA = Number(match.score?.teamA || 0);
@@ -295,12 +267,12 @@ export default function MatchResult() {
   };
 
   return (
-    <div className="w-full space-y-6 p-6">
+    <div className="w-full px-4 py-6 md:px-6 lg:px-8">
       <div className="card bg-gradient-to-br from-primary/15 via-secondary/10 to-base-100 border border-white/10 shadow-sm">
-        <div className="card-body">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="card-body p-5 md:p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h1 className="text-3xl font-black">
+              <h1 className="text-2xl font-black leading-tight md:text-3xl">
                 {teamA.name} <span className="opacity-50">vs</span> {teamB.name}
               </h1>
               <p className="text-sm opacity-70 mt-1">
@@ -310,7 +282,7 @@ export default function MatchResult() {
                   : ""}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 md:justify-end">
               <span className="badge badge-lg capitalize">{match.status}</span>
               <button type="button" className="btn btn-sm btn-outline" onClick={handleShare}>
                 Share
@@ -328,7 +300,7 @@ export default function MatchResult() {
             </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-center gap-6 md:gap-10">
+          <div className="mt-5 flex items-center justify-center gap-6 md:mt-6 md:gap-10">
             <div className="text-center">
               <p className="text-xs opacity-60">{teamA.name}</p>
               <p className="text-5xl font-black text-primary">{match.score?.teamA ?? 0}</p>
@@ -342,7 +314,7 @@ export default function MatchResult() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="card bg-base-100/50 border border-white/10 shadow-sm">
           <div className="card-body p-4">
             <p className="text-xs opacity-60">Total Goals</p>
@@ -368,27 +340,11 @@ export default function MatchResult() {
             </p>
           </div>
         </div>
-        <div className="card bg-base-100/50 border border-white/10 shadow-sm">
-          <div className="card-body p-4">
-            <p className="text-xs opacity-60">Fan Reactions</p>
-            <div className="flex items-center gap-2 mt-1">
-              <button type="button" className="btn btn-xs" onClick={() => voteReaction("fire")}>
-                🔥 {reactions.fire}
-              </button>
-              <button type="button" className="btn btn-xs" onClick={() => voteReaction("clap")}>
-                👏 {reactions.clap}
-              </button>
-              <button type="button" className="btn btn-xs" onClick={() => voteReaction("wow")}>
-                😮 {reactions.wow}
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="card p-4 bg-base-100/50 border border-white/10 shadow-sm">
-          <h3 className="font-bold mb-2">{teamA.name} Summary</h3>
+          <h3 className="font-bold mb-2 text-base">{teamA.name} Summary</h3>
           <p className="text-sm opacity-70 mb-3">
             {goalsByTeam.teamA} goals • {cardsByTeam.teamA.yellow} yellow • {cardsByTeam.teamA.red} red
           </p>
@@ -411,7 +367,7 @@ export default function MatchResult() {
         </div>
 
         <div className="card p-4 bg-base-100/50 border border-white/10 shadow-sm">
-          <h3 className="font-bold mb-2">{teamB.name} Summary</h3>
+          <h3 className="font-bold mb-2 text-base">{teamB.name} Summary</h3>
           <p className="text-sm opacity-70 mb-3">
             {goalsByTeam.teamB} goals • {cardsByTeam.teamB.yellow} yellow • {cardsByTeam.teamB.red} red
           </p>
@@ -434,13 +390,13 @@ export default function MatchResult() {
         </div>
       </div>
 
-      <div className="card p-4 bg-base-100/50 border border-white/10 shadow-sm">
+      <div className="card mt-6 p-4 bg-base-100/50 border border-white/10 shadow-sm">
         <h3 className="font-bold mb-3">Match Timeline</h3>
         {timeline.length ? (
-          <ul className="space-y-2">
+          <ul className="space-y-2.5">
             {timeline.map((event) => (
-              <li key={event.key} className="flex items-center justify-between rounded-lg bg-base-200/50 p-2">
-                <div className="flex items-center gap-2">
+              <li key={event.key} className="rounded-lg bg-base-200/50 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-xs opacity-70">{event.minute}'</span>
                   <span className={`badge badge-sm ${
                     event.type === "goal"
@@ -464,7 +420,7 @@ export default function MatchResult() {
       </div>
 
       {(posterNote || posterUrl) && (
-        <div className="card p-4 bg-base-100/50 border border-white/10 shadow-sm">
+        <div className="card mt-6 p-4 bg-base-100/50 border border-white/10 shadow-sm">
           <h3 className="font-bold mb-2">Match Poster</h3>
           {posterNote && <p className="text-sm opacity-80 mb-2">{posterNote}</p>}
           {posterUrl && (
@@ -480,7 +436,7 @@ export default function MatchResult() {
         </div>
       )}
 
-      <div className="mt-6">
+      <div className="mt-6 flex justify-start">
         <Link to="/" className="btn">
           Back to home
         </Link>
