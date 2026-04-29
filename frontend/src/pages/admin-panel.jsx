@@ -102,6 +102,11 @@ export default function AdminPanel() {
     scoreTeamA: "",
     scoreTeamB: "",
   });
+  const [showAddPlayerToTeamModal, setShowAddPlayerToTeamModal] =
+    useState(false);
+  const [selectedTeamForAddPlayer, setSelectedTeamForAddPlayer] =
+    useState(null);
+  const [selectedPlayersToAdd, setSelectedPlayersToAdd] = useState([]);
   const [showEditPlayerModal, setShowEditPlayerModal] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState({
     _id: "",
@@ -921,6 +926,99 @@ export default function AdminPanel() {
     }
   };
 
+  // Handle adding players to existing team
+  const handleOpenAddPlayersToTeamModal = (team) => {
+    setSelectedTeamForAddPlayer(team);
+    setSelectedPlayersToAdd([]);
+    setShowAddPlayerToTeamModal(true);
+  };
+
+  const handleAddPlayersToTeam = async () => {
+    if (!selectedTournament || !selectedTeamForAddPlayer) {
+      notify("No tournament or team selected", "error");
+      return;
+    }
+
+    if (selectedPlayersToAdd.length === 0) {
+      notify("Select at least one player to add", "error");
+      return;
+    }
+
+    try {
+      // Get current team data
+      const currentTeam = selectedTournamentDetails?.teams?.find(
+        (t) =>
+          (typeof t === "string" ? t : t?.name) ===
+          (typeof selectedTeamForAddPlayer === "string"
+            ? selectedTeamForAddPlayer
+            : selectedTeamForAddPlayer?.name),
+      );
+
+      // Get current players in the team
+      const currentPlayerIds = Array.isArray(currentTeam?.players)
+        ? currentTeam.players.map((p) =>
+            typeof p === "string" ? p : p?._id || p?.id || "",
+          )
+        : [];
+
+      // Combine current players with new players (no duplicates)
+      const updatedPlayerIds = [
+        ...new Set([...currentPlayerIds, ...selectedPlayersToAdd]),
+      ];
+
+      // Prepare updated teams array
+      const updatedTeams = selectedTournamentDetails.teams.map((team) => {
+        const teamName = typeof team === "string" ? team : team?.name;
+        const selectedTeamName =
+          typeof selectedTeamForAddPlayer === "string"
+            ? selectedTeamForAddPlayer
+            : selectedTeamForAddPlayer?.name;
+
+        if (teamName === selectedTeamName) {
+          return {
+            name: teamName,
+            players: updatedPlayerIds,
+            captain: updatedPlayerIds[0] || null,
+          };
+        }
+        return {
+          name: teamName,
+          players: Array.isArray(team?.players)
+            ? team.players.map((p) =>
+                typeof p === "string" ? p : p?._id || p?.id || "",
+              )
+            : [],
+          captain: team?.captain || null,
+        };
+      });
+
+      // Update tournament with new team composition
+      await fetchWithAuth(
+        `/tournaments/${selectedTournament._id || selectedTournament.id}/teams`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ teams: updatedTeams }),
+        },
+      );
+
+      // Reload data
+      await loadTournamentDetails(
+        selectedTournament._id || selectedTournament.id,
+      );
+      await loadTournaments();
+
+      notify(
+        `Added ${selectedPlayersToAdd.length} player(s) to ${selectedTeamForAddPlayer?.name || "team"}`,
+        "success",
+      );
+      setShowAddPlayerToTeamModal(false);
+      setSelectedTeamForAddPlayer(null);
+      setSelectedPlayersToAdd([]);
+    } catch (error) {
+      notify(`Could not add players to team: ${error.message}`, "error");
+    }
+  };
+
   const upcomingTournamentFixtures = tournamentFixtures.filter(
     (fixture) => fixture.status === "upcoming",
   );
@@ -1593,6 +1691,47 @@ export default function AdminPanel() {
                       >
                         Transfer
                       </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-white/10 bg-base-100/40 p-4 space-y-3">
+                    <h4 className="font-semibold">Add Players to Teams</h4>
+                    <p className="text-xs opacity-60">
+                      Expand an existing team and add new players to it.
+                    </p>
+                    <div className="space-y-2">
+                      {(selectedTournamentDetails?.teams || []).map((team) => {
+                        const teamName =
+                          typeof team === "string" ? team : team?.name || "";
+                        const playerCount = Array.isArray(team?.players)
+                          ? team.players.length
+                          : 0;
+                        return (
+                          <div
+                            key={teamName}
+                            className="flex items-center justify-between p-2 bg-base-200 rounded"
+                          >
+                            <div>
+                              <p className="font-semibold text-sm">
+                                {teamName}
+                              </p>
+                              <p className="text-xs opacity-60">
+                                {playerCount} players
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-info btn-sm"
+                              onClick={() =>
+                                handleOpenAddPlayersToTeamModal(team)
+                              }
+                            >
+                              <Plus className="w-4" />
+                              Add Players
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -3304,6 +3443,121 @@ export default function AdminPanel() {
                 </button>
               </div>
             </div>
+          </dialog>
+        </>
+      )}
+
+      {showAddPlayerToTeamModal && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setShowAddPlayerToTeamModal(false)}
+          ></div>
+          <dialog open className="modal modal-open z-50">
+            <form
+              className="modal-box max-w-md space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleAddPlayersToTeam();
+              }}
+            >
+              <h3 className="font-bold text-lg">
+                Add Players to{" "}
+                {typeof selectedTeamForAddPlayer === "string"
+                  ? selectedTeamForAddPlayer
+                  : selectedTeamForAddPlayer?.name || "Team"}
+              </h3>
+
+              <div>
+                <p className="text-sm font-semibold mb-2">
+                  Select players to add:
+                </p>
+                <div className="max-h-64 overflow-y-auto border border-white/10 rounded p-2 bg-base-100 space-y-2">
+                  {players.map((player) => {
+                    const isSelected = selectedPlayersToAdd.includes(
+                      player._id,
+                    );
+                    // Check if player is already in the team
+                    const isAlreadyInTeam = (
+                      selectedTeamForAddPlayer?.players || []
+                    ).some((p) => {
+                      const pId = typeof p === "string" ? p : p?._id || p?.id;
+                      return String(pId) === String(player._id);
+                    });
+
+                    return (
+                      <label
+                        key={player._id}
+                        className="flex items-center gap-2 p-2 rounded hover:bg-base-200 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          className="checkbox checkbox-sm"
+                          checked={isSelected}
+                          disabled={isAlreadyInTeam}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedPlayersToAdd([
+                                ...selectedPlayersToAdd,
+                                player._id,
+                              ]);
+                            } else {
+                              setSelectedPlayersToAdd(
+                                selectedPlayersToAdd.filter(
+                                  (id) => id !== player._id,
+                                ),
+                              );
+                            }
+                          }}
+                        />
+                        <div className="flex-1">
+                          <p
+                            className={`text-sm font-semibold ${
+                              isAlreadyInTeam ? "opacity-50 line-through" : ""
+                            }`}
+                          >
+                            {player.name}
+                          </p>
+                          <p className="text-xs opacity-60">
+                            {player.playerId}
+                          </p>
+                        </div>
+                        {isAlreadyInTeam && (
+                          <span className="text-xs badge badge-sm">
+                            In team
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-xs opacity-60 mt-2">
+                  Selected: {selectedPlayersToAdd.length} player(s)
+                </p>
+              </div>
+
+              <div className="modal-action gap-3">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setShowAddPlayerToTeamModal(false);
+                    setSelectedTeamForAddPlayer(null);
+                    setSelectedPlayersToAdd([]);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-info"
+                  disabled={selectedPlayersToAdd.length === 0}
+                >
+                  <Plus className="w-4" />
+                  Add {selectedPlayersToAdd.length} Player(s)
+                </button>
+              </div>
+            </form>
           </dialog>
         </>
       )}
