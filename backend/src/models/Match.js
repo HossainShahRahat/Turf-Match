@@ -5,19 +5,24 @@ const goalSchema = new mongoose.Schema(
     player: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Player",
-      required: true
+      required: true,
+    },
+    assist: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Player",
+      default: null,
     },
     minute: {
       type: Number,
-      default: 0
+      default: 0,
     },
     teamIndex: {
       type: Number,
       enum: [0, 1],
-      required: true
-    }
+      required: true,
+    },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const cardSchema = new mongoose.Schema(
@@ -25,24 +30,24 @@ const cardSchema = new mongoose.Schema(
     player: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Player",
-      required: true
+      required: true,
     },
     minute: {
       type: Number,
-      default: 0
+      default: 0,
     },
     teamIndex: {
       type: Number,
       enum: [0, 1],
-      required: true
+      required: true,
     },
     type: {
       type: String,
       enum: ["yellow", "red"],
-      required: true
-    }
+      required: true,
+    },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const teamSchema = new mongoose.Schema(
@@ -50,12 +55,16 @@ const teamSchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
     },
     players: [{ type: mongoose.Schema.Types.ObjectId, ref: "Player" }],
-    captain: { type: mongoose.Schema.Types.ObjectId, ref: "Player", default: null }
+    captain: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Player",
+      default: null,
+    },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const matchSchema = new mongoose.Schema(
@@ -64,36 +73,57 @@ const matchSchema = new mongoose.Schema(
       type: [teamSchema],
       validate: {
         validator: (value) => Array.isArray(value) && value.length === 2,
-        message: "Match must contain exactly 2 teams"
+        message: "Match must contain exactly 2 teams",
       },
-      required: true
+      required: true,
     },
     goals: { type: [goalSchema], default: [] },
     score: {
       teamA: { type: Number, default: null, min: 0 },
-      teamB: { type: Number, default: null, min: 0 }
+      teamB: { type: Number, default: null, min: 0 },
     },
     cards: { type: [cardSchema], default: [] },
     ratings: {
       type: [
         new mongoose.Schema(
           {
-            rater: { type: mongoose.Schema.Types.ObjectId, ref: "Player", required: true },
-            target: { type: mongoose.Schema.Types.ObjectId, ref: "Player", required: true },
-            score: { type: Number, min: 1, max: 10, required: true }
+            rater: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "Player",
+              required: true,
+            },
+            target: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "Player",
+              required: true,
+            },
+            score: { type: Number, min: 1, max: 10, required: true },
           },
-          { _id: false }
-        )
+          { _id: false },
+        ),
       ],
-      default: []
+      default: [],
     },
     statsProcessed: { type: Boolean, default: false },
-    tournament: { type: mongoose.Schema.Types.ObjectId, ref: "Tournament", default: null },
+    tournament: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tournament",
+      default: null,
+    },
     phase: { type: String, trim: true, default: "regular" },
     scheduledAt: { type: Date, default: null },
-    status: { type: String, enum: ["upcoming", "live", "finished"], default: "upcoming" }
+    matchDuration: { type: Number, default: 90 },
+    timerStartedAt: { type: Date, default: null },
+    timerPausedAt: { type: Date, default: null },
+    timerRunning: { type: Boolean, default: false },
+    timerOffset: { type: Number, default: 0 },
+    status: {
+      type: String,
+      enum: ["upcoming", "live", "finished"],
+      default: "upcoming",
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export const Match = mongoose.model("Match", matchSchema);

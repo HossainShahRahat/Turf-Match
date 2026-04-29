@@ -17,7 +17,7 @@ async function parseResponse(response) {
 }
 
 export async function apiRequest(path, options = {}) {
-  const { token, onUnauthorized, body, headers, ...rest } = options;
+  const { token, onUnauthorized, body, headers, signal, ...rest } = options;
   const response = await fetch(apiUrl(path), {
     ...rest,
     headers: {
@@ -28,6 +28,7 @@ export async function apiRequest(path, options = {}) {
     ...(body !== undefined
       ? { body: typeof body === "string" ? body : JSON.stringify(body) }
       : {}),
+    ...(signal ? { signal } : {}),
   });
 
   if (response.status === 401 && typeof onUnauthorized === "function") {

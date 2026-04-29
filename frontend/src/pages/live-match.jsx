@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
-import { Activity, Plus, ShieldAlert, Trophy } from "lucide-react";
+import { Activity, Plus, ShieldAlert, Trophy, Clock, Play, Pause, RotateCcw, Pencil, Trash2 } from "lucide-react";
 import { socketBaseUrl } from "../lib/config.js";
 import { useAuth } from "../lib/auth.jsx";
 import { apiRequest } from "../lib/api-client.js";
@@ -17,27 +17,125 @@ export default function LiveMatch() {
   const [loading, setLoading] = useState(true);
   const [showAddGoalModal, setShowAddGoalModal] = useState(false);
   const [showAddCardModal, setShowAddCardModal] = useState(false);
+  const [showEditGoalModal, setShowEditGoalModal] = useState(false);
+  const [showEditCardModal, setShowEditCardModal] = useState(false);
   const [goalMinute, setGoalMinute] = useState("");
   const [cardMinute, setCardMinute] = useState("");
   const [cardType, setCardType] = useState("yellow");
   const [selectedTeamIndex, setSelectedTeamIndex] = useState(0);
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
+  const [assistPlayerId, setAssistPlayerId] = useState("");
+  const [editingGoalIndex, setEditingGoalIndex] = useState(null);
+  const [editingCardIndex, setEditingCardIndex] = useState(null);
+  const [currentTimeDisplay, setCurrentTimeDisplay] = useState("00:00");
+  const [isOvertime, setIsOvertime] = useState(false);
   const socketRef = useRef(null);
+  const selectedMatchIdRef = useRef(null);
+  const scoreFlashTimeoutRef = useRef(null);
+  const eventFlashTimeoutRef = useRef(null);
+  const timerIntervalRef = useRef(null);
+
+  useEffect(() => {
+    selectedMatchIdRef.current = selectedMatch?._id || null;
+  }, [selectedMatch?._id]);
 
   useEffect(() => {
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
       }
+      if (scoreFlashTimeoutRef.current)
+        clearTimeout(scoreFlashTimeoutRef.current);
+      if (eventFlashTimeoutRef.current)
+        clearTimeout(eventFlashTimeoutRef.current);
+      if (timerIntervalRef.current)
+        clearInterval(timerIntervalRef.current);
     };
   }, []);
+
+  // Timer calculation
+  useEffect(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+
+    if (!selectedMatch?.timerRunning) {
+      // Calculate static display when paused
+      updateTimeDisplay(selectedMatch);
+      return;
+    }
+
+    timerIntervalRef.current = setInterval(() => {
+      updateTimeDisplay(selectedMatch);
+    }, 1000);
+
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, [selectedMatch?.timerRunning, selectedMatch?.timerStartedAt, selectedMatch?.timerOffset, selectedMatch?.matchDuration, selectedMatch?.timerPausedAt]);
+
+  const updateTimeDisplay = (match) => {
+    if (!match) {
+      setCurrentTimeDisplay("00:00");
+      setIsOvertime(false);
+      return;
+    }
+
+    const offset = match.timerOffset || 0;
+    let elapsedSec = offset;
+
+    if (match.timerRunning && match.timerStartedAt) {
+      const now = new Date();
+      const started = new Date(match.timerStartedAt);
+      elapsedSec += Math.floor((now - started) / 1000);
+    } else if (match.timerPausedAt && match.timerStartedAt) {
+      const paused = new Date(match.timerPausedAt);
+      const started = new Date(match.timerStartedAt);
+      elapsedSec += Math.floor((paused - started) / 1000);
+    }
+
+    const totalMinutes = Math.floor(elapsedSec / 60);
+    const seconds = elapsedSec % 60;
+    const matchDuration = match.matchDuration || 90;
+    const overtime = Math.max(0, totalMinutes - matchDuration);
+    const displayMinute = overtime > 0 ? matchDuration : totalMinutes;
+
+    setIsOvertime(overtime > 0);
+    setCurrentTimeDisplay(
+      `${String(displayMinute).padStart(2, '0')}${overtime > 0 ? `+${overtime}` : ''}:${String(seconds).padStart(2, '0')}`
+    );
+  };
+
+  const getCurrentMinute = () => {
+    if (!selectedMatch) return 0;
+    const offset = selectedMatch.timerOffset || 0;
+    let elapsedSec = offset;
+
+    if (selectedMatch.timerRunning && selectedMatch.timerStartedAt) {
+      const now = new Date();
+      const started = new Date(selectedMatch.timerStartedAt);
+      elapsedSec += Math.floor((now - started) / 1000);
+    } else if (selectedMatch.timerPausedAt && selectedMatch.timerStartedAt) {
+      const paused = new Date(selectedMatch.timerPausedAt);
+      const started = new Date(selectedMatch.timerStartedAt);
+      elapsedSec += Math.floor((paused - started) / 1000);
+    }
+
+    return Math.floor(elapsedSec / 60);
+  };
 
   const resetEventForm = () => {
     setGoalMinute("");
     setCardMinute("");
     setCardType("yellow");
     setSelectedPlayerId("");
+    setAssistPlayerId("");
     setSelectedTeamIndex(0);
+    setEditingGoalIndex(null);
+    setEditingCardIndex(null);
   };
 
   const announceMatchDelta = (previousMatch, updatedMatch) => {
@@ -48,7 +146,12 @@ export default function LiveMatch() {
     const nextB = Number(updatedMatch.score?.teamB || 0);
     if (prevA !== nextA || prevB !== nextB) {
       setScoreFlash(true);
-      setTimeout(() => setScoreFlash(false), 1200);
+      if (scoreFlashTimeoutRef.current)
+        clearTimeout(scoreFlashTimeoutRef.current);
+      scoreFlashTimeoutRef.current = setTimeout(
+        () => setScoreFlash(false),
+        1200,
+      );
     }
 
     const prevGoals = previousMatch.goals?.length || 0;
@@ -57,7 +160,9 @@ export default function LiveMatch() {
       const latestGoal = updatedMatch.goals?.[nextGoals - 1];
       const scorer = latestGoal?.player?.name || "A player";
       setEventFlash(`GOAL! ${scorer} (${nextA}-${nextB})`);
-      setTimeout(() => setEventFlash(""), 1800);
+      if (eventFlashTimeoutRef.current)
+        clearTimeout(eventFlashTimeoutRef.current);
+      eventFlashTimeoutRef.current = setTimeout(() => setEventFlash(""), 1800);
       return;
     }
 
@@ -68,7 +173,9 @@ export default function LiveMatch() {
       const cardPlayer = latestCard?.player?.name || "A player";
       const label = latestCard?.type === "red" ? "Red Card" : "Yellow Card";
       setEventFlash(`${label}: ${cardPlayer}`);
-      setTimeout(() => setEventFlash(""), 1800);
+      if (eventFlashTimeoutRef.current)
+        clearTimeout(eventFlashTimeoutRef.current);
+      eventFlashTimeoutRef.current = setTimeout(() => setEventFlash(""), 1800);
     }
   };
 
@@ -82,6 +189,61 @@ export default function LiveMatch() {
     setLiveMatches((matches) =>
       matches.map((m) => (m._id === updatedMatch._id ? updatedMatch : m)),
     );
+  };
+
+  const handleStartTimer = async () => {
+    if (!selectedMatch) return;
+    try {
+      const token = getToken();
+      const data = await apiRequest(`/matches/${selectedMatch._id}/timer/start`, {
+        method: "POST",
+        token,
+        body: { matchDuration: selectedMatch.matchDuration || 90 },
+      });
+      syncUpdatedMatch(data.match);
+      setMessage("Timer started.");
+      setMessageType("success");
+    } catch (error) {
+      setMessage(`Could not start timer: ${error.message}`);
+      setMessageType("error");
+    }
+  };
+
+  const handlePauseTimer = async (finishMatch = false) => {
+    if (!selectedMatch) return;
+    try {
+      const token = getToken();
+      const data = await apiRequest(`/matches/${selectedMatch._id}/timer/pause`, {
+        method: "POST",
+        token,
+        body: { finishMatch },
+      });
+      syncUpdatedMatch(data.match);
+      setMessage(finishMatch ? "Match finished." : "Timer paused.");
+      setMessageType("success");
+    } catch (error) {
+      setMessage(`Could not pause timer: ${error.message}`);
+      setMessageType("error");
+    }
+  };
+
+  const handleCancelMatch = async () => {
+    if (!selectedMatch) return;
+    const ok = window.confirm("Are you sure you want to cancel and reset this match? All goals, cards, and timer will be cleared.");
+    if (!ok) return;
+    try {
+      const token = getToken();
+      const data = await apiRequest(`/matches/${selectedMatch._id}/cancel`, {
+        method: "POST",
+        token,
+      });
+      syncUpdatedMatch(data.match);
+      setMessage("Match cancelled and reset.");
+      setMessageType("success");
+    } catch (error) {
+      setMessage(`Could not cancel match: ${error.message}`);
+      setMessageType("error");
+    }
   };
 
   const handleAddGoal = async (e) => {
@@ -100,6 +262,7 @@ export default function LiveMatch() {
         body: {
           playerId: selectedPlayerId,
           minute: goalMinute || 0,
+          assistPlayerId: assistPlayerId || undefined,
         },
       });
 
@@ -110,6 +273,37 @@ export default function LiveMatch() {
       setMessageType("success");
     } catch (error) {
       setMessage(`Could not add goal: ${error.message}`);
+      setMessageType("error");
+    }
+  };
+
+  const handleEditGoal = async (e) => {
+    e.preventDefault();
+    if (!selectedMatch || editingGoalIndex === null || !selectedPlayerId) {
+      setMessage("Invalid goal edit request.");
+      setMessageType("error");
+      return;
+    }
+
+    try {
+      const token = getToken();
+      const data = await apiRequest(`/matches/${selectedMatch._id}/goals/${editingGoalIndex}`, {
+        method: "PATCH",
+        token,
+        body: {
+          playerId: selectedPlayerId,
+          minute: goalMinute || 0,
+          assistPlayerId: assistPlayerId === "" ? null : assistPlayerId,
+        },
+      });
+
+      syncUpdatedMatch(data.match);
+      setShowEditGoalModal(false);
+      resetEventForm();
+      setMessage("Goal updated.");
+      setMessageType("success");
+    } catch (error) {
+      setMessage(`Could not update goal: ${error.message}`);
       setMessageType("error");
     }
   };
@@ -145,6 +339,67 @@ export default function LiveMatch() {
     }
   };
 
+  const handleEditCard = async (e) => {
+    e.preventDefault();
+    if (!selectedMatch || editingCardIndex === null || !selectedPlayerId) {
+      setMessage("Invalid card edit request.");
+      setMessageType("error");
+      return;
+    }
+
+    try {
+      const token = getToken();
+      const data = await apiRequest(`/matches/${selectedMatch._id}/cards/${editingCardIndex}`, {
+        method: "PATCH",
+        token,
+        body: {
+          playerId: selectedPlayerId,
+          minute: cardMinute || 0,
+          type: cardType,
+        },
+      });
+
+      syncUpdatedMatch(data.match);
+      setShowEditCardModal(false);
+      resetEventForm();
+      setMessage("Card updated.");
+      setMessageType("success");
+    } catch (error) {
+      setMessage(`Could not update card: ${error.message}`);
+      setMessageType("error");
+    }
+  };
+
+  const openEditGoal = (goal, index) => {
+    setEditingGoalIndex(index);
+    setSelectedPlayerId(goal.player?._id || goal.player?.toString() || "");
+    setAssistPlayerId(goal.assist?._id || goal.assist?.toString() || "");
+    setGoalMinute(goal.minute || "");
+    setSelectedTeamIndex(goal.teamIndex || 0);
+    setShowEditGoalModal(true);
+  };
+
+  const openEditCard = (card, index) => {
+    setEditingCardIndex(index);
+    setSelectedPlayerId(card.player?._id || card.player?.toString() || "");
+    setCardType(card.type || "yellow");
+    setCardMinute(card.minute || "");
+    setSelectedTeamIndex(card.teamIndex || 0);
+    setShowEditCardModal(true);
+  };
+
+  const openAddGoalModal = () => {
+    resetEventForm();
+    setGoalMinute(getCurrentMinute());
+    setShowAddGoalModal(true);
+  };
+
+  const openAddCardModal = () => {
+    resetEventForm();
+    setCardMinute(getCurrentMinute());
+    setShowAddCardModal(true);
+  };
+
   function renderMatch(matchData) {
     if (!matchData) return null;
 
@@ -153,8 +408,29 @@ export default function LiveMatch() {
     const redCount =
       matchData.cards?.filter((card) => card.type === "red").length || 0;
 
+    // Build unified events timeline
+    const events = [
+      ...(matchData.goals || []).map((goal, idx) => ({
+        type: "goal",
+        index: idx,
+        minute: goal.minute || 0,
+        player: goal.player,
+        assist: goal.assist,
+        teamIndex: goal.teamIndex,
+      })),
+      ...(matchData.cards || []).map((card, idx) => ({
+        type: "card",
+        index: idx,
+        minute: card.minute || 0,
+        player: card.player,
+        cardType: card.type,
+        teamIndex: card.teamIndex,
+      })),
+    ].sort((a, b) => (a.minute || 0) - (b.minute || 0));
+
     return (
       <div className="space-y-6">
+        {/* Score & Timer Card */}
         <div className="card bg-gradient-to-br from-primary/10 to-secondary/10 border border-white/10 shadow-sm">
           <div className="card-body">
             <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
@@ -164,6 +440,11 @@ export default function LiveMatch() {
                 </h2>
               </div>
               <div className="flex flex-col items-center gap-4">
+                {/* Timer Display */}
+                <div className={`text-2xl font-mono font-bold flex items-center gap-2 ${isOvertime ? 'text-warning' : 'text-info'}`}>
+                  <Clock className="w-5 h-5" />
+                  {currentTimeDisplay}
+                </div>
                 <div
                   className={`text-5xl font-mono font-bold transition-all ${
                     scoreFlash ? "scale-110 text-success" : ""
@@ -185,7 +466,50 @@ export default function LiveMatch() {
                   }`}
                 >
                   {matchData.status?.toUpperCase() || "PENDING"}
+                  {isOvertime ? " · OT" : ""}
                 </div>
+                {/* Timer Controls */}
+                {user && matchData.status !== "finished" && (
+                  <div className="flex gap-2">
+                    {!matchData.timerRunning ? (
+                      <button
+                        type="button"
+                        className="btn btn-success btn-sm"
+                        onClick={handleStartTimer}
+                      >
+                        <Play className="w-4 h-4" />
+                        Start
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-warning btn-sm"
+                        onClick={() => handlePauseTimer(false)}
+                      >
+                        <Pause className="w-4 h-4" />
+                        Pause
+                      </button>
+                    )}
+                    {matchData.timerRunning && (
+                      <button
+                        type="button"
+                        className="btn btn-error btn-sm"
+                        onClick={() => handlePauseTimer(true)}
+                      >
+                        <Trophy className="w-4 h-4" />
+                        End Match
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleCancelMatch}
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      Reset
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="flex-1 text-center lg:text-right">
                 <h2 className="text-2xl font-bold">
@@ -196,6 +520,7 @@ export default function LiveMatch() {
           </div>
         </div>
 
+        {/* Unified Events Timeline */}
         <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
           <div className="card-body">
             {eventFlash && (
@@ -204,13 +529,13 @@ export default function LiveMatch() {
               </div>
             )}
             <div className="flex items-center justify-between mb-4">
-              <h3 className="card-title text-xl">Goals</h3>
-              {user && (
+              <h3 className="card-title text-xl">Match Events</h3>
+              {user && matchData.status !== "finished" && (
                 <div className="flex gap-2">
                   <button
                     type="button"
                     className="btn btn-warning btn-sm"
-                    onClick={() => setShowAddCardModal(true)}
+                    onClick={openAddCardModal}
                   >
                     <ShieldAlert className="w-4" />
                     Add Card
@@ -218,7 +543,7 @@ export default function LiveMatch() {
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
-                    onClick={() => setShowAddGoalModal(true)}
+                    onClick={openAddGoalModal}
                   >
                     <Plus className="w-4" />
                     Add Goal
@@ -226,94 +551,86 @@ export default function LiveMatch() {
                 </div>
               )}
             </div>
-            {matchData.goals && matchData.goals.length > 0 ? (
-              <div className="space-y-3">
-                {matchData.goals.map((goal, index) => {
-                  const teamName =
-                    goal.teamIndex === 0
-                      ? matchData.teams[0]?.name || "Team A"
-                      : matchData.teams[1]?.name || "Team B";
-                  return (
-                    <div
-                      key={`goal-${index}`}
-                      className="flex items-center gap-4 p-3 rounded-lg bg-base-200/50 hover:bg-base-200"
-                    >
-                      <div className="font-mono text-sm font-bold opacity-70 w-12">
-                        {goal.minute}'
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-semibold">
-                          {goal.player?.name || "Unknown Player"}
-                        </div>
-                        <div className="text-xs opacity-60">{teamName}</div>
-                      </div>
-                      {user && (
-                        <div className="text-xs opacity-60">
-                          {goal.player?.playerId || "-"}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-8 opacity-60">
-                No goals scored yet
-              </div>
-            )}
-          </div>
-        </div>
 
-        <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
-          <div className="card-body">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="card-title text-xl">Cards</h3>
-              <div className="text-sm opacity-70">
-                {matchData.cards?.length || 0} total
-              </div>
-            </div>
-            {matchData.cards && matchData.cards.length > 0 ? (
-              <div className="space-y-3">
-                {matchData.cards.map((card, index) => {
-                  const teamName =
-                    card.teamIndex === 0
-                      ? matchData.teams[0]?.name || "Team A"
-                      : matchData.teams[1]?.name || "Team B";
-                  return (
-                    <div
-                      key={`card-${index}`}
-                      className="flex items-center gap-4 p-3 rounded-lg bg-base-200/50 hover:bg-base-200"
-                    >
-                      <div className="font-mono text-sm font-bold opacity-70 w-12">
-                        {card.minute}'
-                      </div>
-                      <div
-                        className={`badge ${
-                          card.type === "yellow"
-                            ? "badge-warning"
-                            : "badge-error"
-                        }`}
-                      >
-                        {card.type.toUpperCase()}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-semibold">
-                          {card.player?.name || "Unknown Player"}
+            {events.length > 0 ? (
+              <div className="relative pl-6">
+                {/* Vertical timeline line */}
+                <div className="absolute left-2 top-0 bottom-0 w-0.5 bg-base-300"></div>
+                
+                <div className="space-y-4">
+                  {events.map((event, idx) => {
+                    const teamName =
+                      event.teamIndex === 0
+                        ? matchData.teams[0]?.name || "Team A"
+                        : matchData.teams[1]?.name || "Team B";
+                    
+                    return (
+                      <div key={`${event.type}-${event.index}-${idx}`} className="relative flex items-start gap-4">
+                        {/* Timeline dot */}
+                        <div className={`absolute -left-4 w-4 h-4 rounded-full border-2 border-base-100 flex items-center justify-center ${
+                          event.type === "goal" 
+                            ? "bg-success" 
+                            : event.cardType === "red"
+                            ? "bg-error"
+                            : "bg-warning"
+                        }`}>
+                          {event.type === "goal" ? (
+                            <span className="text-white text-xs">⚽</span>
+                          ) : (
+                            <div className={`w-2 h-3 rounded-sm ${event.cardType === "red" ? "bg-red-600" : "bg-yellow-400"}`}></div>
+                          )}
                         </div>
-                        <div className="text-xs opacity-60">{teamName}</div>
-                      </div>
-                      {user && (
-                        <div className="text-xs opacity-60">
-                          {card.player?.playerId || "-"}
+
+                        <div className="flex-1 p-3 rounded-lg bg-base-200/50 hover:bg-base-200 transition">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="font-mono text-sm font-bold opacity-70">
+                                {event.minute}'
+                              </div>
+                              <div>
+                                <div className="font-semibold">
+                                  {event.player?.name || "Unknown Player"}
+                                </div>
+                                <div className="text-xs opacity-60">{teamName}</div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {event.type === "goal" && event.assist && (
+                                <span className="text-xs opacity-60 bg-base-300 px-2 py-1 rounded">
+                                  A: {event.assist?.name || "?"}
+                                </span>
+                              )}
+                              {event.type === "card" && (
+                                <span className={`badge ${event.cardType === "red" ? "badge-error" : "badge-warning"}`}>
+                                  {event.cardType.toUpperCase()}
+                                </span>
+                              )}
+                              {user && matchData.status !== "finished" && (
+                                <div className="flex gap-1">
+                                  <button
+                                    type="button"
+                                    className="btn btn-xs btn-ghost"
+                                    onClick={() => 
+                                      event.type === "goal" 
+                                        ? openEditGoal(matchData.goals[event.index], event.index)
+                                        : openEditCard(matchData.cards[event.index], event.index)
+                                    }
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
               <div className="text-center py-8 opacity-60">
-                No cards issued yet
+                No events yet
               </div>
             )}
           </div>
@@ -396,7 +713,9 @@ export default function LiveMatch() {
     };
 
     loadAllLiveMatches();
+  }, []);
 
+  useEffect(() => {
     const token = getToken();
     const socket = io(socketBaseUrl(), {
       auth: token ? { token } : {},
@@ -409,9 +728,12 @@ export default function LiveMatch() {
     socketRef.current = socket;
 
     socket.on("match:updated", (updatedMatch) => {
-      if (selectedMatch?._id === updatedMatch._id) {
-        setSelectedMatch(updatedMatch);
-      }
+      setSelectedMatch((current) => {
+        if (current?._id === updatedMatch._id) {
+          return updatedMatch;
+        }
+        return current;
+      });
 
       setLiveMatches((matches) => {
         const updated = matches.map((m) =>
@@ -425,7 +747,7 @@ export default function LiveMatch() {
       const { matchId, status } = data;
       setLiveMatches((matches) => matches.filter((m) => m._id !== matchId));
 
-      if (selectedMatch?._id === matchId) {
+      if (selectedMatchIdRef.current === matchId) {
         setSelectedMatch(null);
         setMessage(`Match status updated to ${status}.`);
         setMessageType("success");
@@ -435,7 +757,17 @@ export default function LiveMatch() {
     return () => {
       socket.disconnect();
     };
-  }, [getToken, selectedMatch?._id]);
+  }, [getToken]);
+
+  // Helper to get available players for assist (excluding scorer)
+  const getAssistOptions = () => {
+    const team = selectedMatch?.teams?.[selectedTeamIndex];
+    if (!team?.players) return [];
+    return team.players.filter((p) => {
+      const pid = p._id?.toString?.() || p.toString?.();
+      return pid !== selectedPlayerId;
+    });
+  };
 
   return (
     <div className="w-full space-y-8">
@@ -456,15 +788,21 @@ export default function LiveMatch() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
             <div className="p-3 rounded-lg bg-base-200/50">
               <p className="font-semibold mb-1">Select a live match</p>
-              <p className="opacity-75">Click a live match card to open match details.</p>
+              <p className="opacity-75">
+                Click a live match card to open match details.
+              </p>
             </div>
             <div className="p-3 rounded-lg bg-base-200/50">
               <p className="font-semibold mb-1">Track events in real time</p>
-              <p className="opacity-75">Goals, cards, and score update automatically.</p>
+              <p className="opacity-75">
+                Goals, cards, and score update automatically.
+              </p>
             </div>
             <div className="p-3 rounded-lg bg-base-200/50">
               <p className="font-semibold mb-1">Admin tools</p>
-              <p className="opacity-75">Add Goal/Add Card buttons appear only for admin login.</p>
+              <p className="opacity-75">
+                Add Goal/Add Card buttons and timer controls appear only for admin login.
+              </p>
             </div>
           </div>
         </div>
@@ -544,6 +882,7 @@ export default function LiveMatch() {
         </div>
       )}
 
+      {/* Add Goal Modal */}
       {showAddGoalModal && selectedMatch && (
         <>
           <div
@@ -551,9 +890,13 @@ export default function LiveMatch() {
             onClick={() => setShowAddGoalModal(false)}
           ></div>
           <dialog open className="modal modal-open z-50">
-            <form className="modal-box max-w-md space-y-4" onSubmit={handleAddGoal}>
+            <form
+              className="modal-box max-w-md space-y-4"
+              onSubmit={handleAddGoal}
+            >
               <h3 className="font-bold text-lg">
-                Add Goal to {selectedMatch.teams[selectedTeamIndex]?.name || "Team"}
+                Add Goal to{" "}
+                {selectedMatch.teams[selectedTeamIndex]?.name || "Team"}
               </h3>
 
               <fieldset className="space-y-2">
@@ -566,9 +909,12 @@ export default function LiveMatch() {
                       onClick={() => {
                         setSelectedTeamIndex(idx);
                         setSelectedPlayerId("");
+                        setAssistPlayerId("");
                       }}
                       className={`flex-1 btn btn-sm ${
-                        selectedTeamIndex === idx ? "btn-primary" : "btn-outline"
+                        selectedTeamIndex === idx
+                          ? "btn-primary"
+                          : "btn-outline"
                       }`}
                     >
                       {team.name}
@@ -589,11 +935,39 @@ export default function LiveMatch() {
                   name="goalPlayer"
                   className="select select-bordered w-full"
                   value={selectedPlayerId}
-                  onChange={(e) => setSelectedPlayerId(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedPlayerId(e.target.value);
+                    setAssistPlayerId("");
+                  }}
                   required
                 >
                   <option value="">Select a player...</option>
-                  {selectedMatch.teams[selectedTeamIndex]?.players?.map((player) => (
+                  {selectedMatch.teams[selectedTeamIndex]?.players?.map(
+                    (player) => (
+                      <option key={player._id} value={player._id}>
+                        {player.name} ({player.playerId})
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="goal-assist"
+                  className="block text-sm font-semibold"
+                >
+                  Assist (optional)
+                </label>
+                <select
+                  id="goal-assist"
+                  name="goalAssist"
+                  className="select select-bordered w-full"
+                  value={assistPlayerId}
+                  onChange={(e) => setAssistPlayerId(e.target.value)}
+                >
+                  <option value="">No assist</option>
+                  {getAssistOptions().map((player) => (
                     <option key={player._id} value={player._id}>
                       {player.name} ({player.playerId})
                     </option>
@@ -606,7 +980,7 @@ export default function LiveMatch() {
                   htmlFor="goal-minute"
                   className="block text-sm font-semibold"
                 >
-                  Minute (optional)
+                  Minute
                 </label>
                 <input
                   id="goal-minute"
@@ -619,6 +993,9 @@ export default function LiveMatch() {
                   value={goalMinute}
                   onChange={(e) => setGoalMinute(e.target.value)}
                 />
+                <p className="text-xs opacity-60">
+                  Auto-filled from current match time. Adjust if needed.
+                </p>
               </div>
 
               <div className="modal-action gap-3">
@@ -639,6 +1016,137 @@ export default function LiveMatch() {
         </>
       )}
 
+      {/* Edit Goal Modal */}
+      {showEditGoalModal && selectedMatch && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setShowEditGoalModal(false)}
+          ></div>
+          <dialog open className="modal modal-open z-50">
+            <form
+              className="modal-box max-w-md space-y-4"
+              onSubmit={handleEditGoal}
+            >
+              <h3 className="font-bold text-lg">
+                Edit Goal
+              </h3>
+
+              <fieldset className="space-y-2">
+                <legend className="block text-sm font-semibold">Team</legend>
+                <div className="flex gap-2">
+                  {selectedMatch.teams.map((team, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTeamIndex(idx);
+                        setSelectedPlayerId("");
+                        setAssistPlayerId("");
+                      }}
+                      className={`flex-1 btn btn-sm ${
+                        selectedTeamIndex === idx
+                          ? "btn-primary"
+                          : "btn-outline"
+                      }`}
+                    >
+                      {team.name}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="edit-goal-player"
+                  className="block text-sm font-semibold"
+                >
+                  Player Scorer
+                </label>
+                <select
+                  id="edit-goal-player"
+                  name="editGoalPlayer"
+                  className="select select-bordered w-full"
+                  value={selectedPlayerId}
+                  onChange={(e) => {
+                    setSelectedPlayerId(e.target.value);
+                    setAssistPlayerId("");
+                  }}
+                  required
+                >
+                  <option value="">Select a player...</option>
+                  {selectedMatch.teams[selectedTeamIndex]?.players?.map(
+                    (player) => (
+                      <option key={player._id} value={player._id}>
+                        {player.name} ({player.playerId})
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="edit-goal-assist"
+                  className="block text-sm font-semibold"
+                >
+                  Assist (optional)
+                </label>
+                <select
+                  id="edit-goal-assist"
+                  name="editGoalAssist"
+                  className="select select-bordered w-full"
+                  value={assistPlayerId}
+                  onChange={(e) => setAssistPlayerId(e.target.value)}
+                >
+                  <option value="">No assist</option>
+                  {getAssistOptions().map((player) => (
+                    <option key={player._id} value={player._id}>
+                      {player.name} ({player.playerId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="edit-goal-minute"
+                  className="block text-sm font-semibold"
+                >
+                  Minute
+                </label>
+                <input
+                  id="edit-goal-minute"
+                  name="editGoalMinute"
+                  type="number"
+                  min="0"
+                  max="120"
+                  placeholder="45"
+                  className="input input-bordered w-full"
+                  value={goalMinute}
+                  onChange={(e) => setGoalMinute(e.target.value)}
+                />
+              </div>
+
+              <div className="modal-action gap-3">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setShowEditGoalModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  <Pencil className="w-4" />
+                  Update Goal
+                </button>
+              </div>
+            </form>
+          </dialog>
+        </>
+      )}
+
+      {/* Add Card Modal */}
       {showAddCardModal && selectedMatch && (
         <>
           <div
@@ -646,9 +1154,13 @@ export default function LiveMatch() {
             onClick={() => setShowAddCardModal(false)}
           ></div>
           <dialog open className="modal modal-open z-50">
-            <form className="modal-box max-w-md space-y-4" onSubmit={handleAddCard}>
+            <form
+              className="modal-box max-w-md space-y-4"
+              onSubmit={handleAddCard}
+            >
               <h3 className="font-bold text-lg">
-                Add Card to {selectedMatch.teams[selectedTeamIndex]?.name || "Team"}
+                Add Card to{" "}
+                {selectedMatch.teams[selectedTeamIndex]?.name || "Team"}
               </h3>
 
               <fieldset className="space-y-2">
@@ -663,7 +1175,9 @@ export default function LiveMatch() {
                         setSelectedPlayerId("");
                       }}
                       className={`flex-1 btn btn-sm ${
-                        selectedTeamIndex === idx ? "btn-primary" : "btn-outline"
+                        selectedTeamIndex === idx
+                          ? "btn-primary"
+                          : "btn-outline"
                       }`}
                     >
                       {team.name}
@@ -692,7 +1206,10 @@ export default function LiveMatch() {
               </div>
 
               <div className="space-y-2">
-                <label htmlFor="card-player" className="block text-sm font-semibold">
+                <label
+                  htmlFor="card-player"
+                  className="block text-sm font-semibold"
+                >
                   Player
                 </label>
                 <select
@@ -704,11 +1221,13 @@ export default function LiveMatch() {
                   required
                 >
                   <option value="">Select a player...</option>
-                  {selectedMatch.teams[selectedTeamIndex]?.players?.map((player) => (
-                    <option key={player._id} value={player._id}>
-                      {player.name} ({player.playerId})
-                    </option>
-                  ))}
+                  {selectedMatch.teams[selectedTeamIndex]?.players?.map(
+                    (player) => (
+                      <option key={player._id} value={player._id}>
+                        {player.name} ({player.playerId})
+                      </option>
+                    ),
+                  )}
                 </select>
               </div>
 
@@ -717,7 +1236,7 @@ export default function LiveMatch() {
                   htmlFor="card-minute"
                   className="block text-sm font-semibold"
                 >
-                  Minute (optional)
+                  Minute
                 </label>
                 <input
                   id="card-minute"
@@ -730,6 +1249,9 @@ export default function LiveMatch() {
                   value={cardMinute}
                   onChange={(e) => setCardMinute(e.target.value)}
                 />
+                <p className="text-xs opacity-60">
+                  Auto-filled from current match time. Adjust if needed.
+                </p>
               </div>
 
               <div className="modal-action gap-3">
@@ -746,6 +1268,121 @@ export default function LiveMatch() {
                 >
                   <ShieldAlert className="w-4" />
                   Add Card
+                </button>
+              </div>
+            </form>
+          </dialog>
+        </>
+      )}
+
+      {/* Edit Card Modal */}
+      {showEditCardModal && selectedMatch && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setShowEditCardModal(false)}
+          ></div>
+          <dialog open className="modal modal-open z-50">
+            <form
+              className="modal-box max-w-md space-y-4"
+              onSubmit={handleEditCard}
+            >
+              <h3 className="font-bold text-lg">
+                Edit Card
+              </h3>
+
+              <fieldset className="space-y-2">
+                <legend className="block text-sm font-semibold">Team</legend>
+                <div className="flex gap-2">
+                  {selectedMatch.teams.map((team, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTeamIndex(idx);
+                        setSelectedPlayerId("");
+                      }}
+                      className={`flex-1 btn btn-sm ${
+                        selectedTeamIndex === idx
+                          ? "btn-primary"
+                          : "btn-outline"
+                      }`}
+                    >
+                      {team.name}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="edit-card-type"
+                  className="block text-sm font-semibold"
+                >
+                  Card Type
+                </label>
+                <select
+                  id="edit-card-type"
+                  name="editCardType"
+                  className="select select-bordered w-full"
+                  value={cardType}
+                  onChange={(e) => setCardType(e.target.value)}
+                >
+                  <option value="yellow">Yellow Card</option>
+                  <option value="red">Red Card</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="edit-card-player" className="block text-sm font-semibold">
+                  Player
+                </label>
+                <select
+                  id="edit-card-player"
+                  name="editCardPlayer"
+                  className="select select-bordered w-full"
+                  value={selectedPlayerId}
+                  onChange={(e) => setSelectedPlayerId(e.target.value)}
+                  required
+                >
+                  <option value="">Select a player...</option>
+                  {selectedMatch.teams[selectedTeamIndex]?.players?.map(
+                    (player) => (
+                      <option key={player._id} value={player._id}>
+                        {player.name} ({player.playerId})
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="edit-card-minute" className="block text-sm font-semibold">
+                  Minute
+                </label>
+                <input
+                  id="edit-card-minute"
+                  name="editCardMinute"
+                  type="number"
+                  min="0"
+                  max="120"
+                  placeholder="45"
+                  className="input input-bordered w-full"
+                  value={cardMinute}
+                  onChange={(e) => setCardMinute(e.target.value)}
+                />
+              </div>
+
+              <div className="modal-action gap-3">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setShowEditCardModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className={`btn ${cardType === "yellow" ? "btn-warning" : "btn-error"}`}>
+                  <Pencil className="w-4" />
+                  Update Card
                 </button>
               </div>
             </form>

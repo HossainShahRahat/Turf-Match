@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿﻿import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiUrl } from "../lib/config.js";
 import { useAuth } from "../lib/auth.jsx";
@@ -46,9 +46,13 @@ export default function AdminPanel() {
     knockoutRound: "semi",
     groupQualifiedCount: 2,
     includeThirdPlaceMatch: false,
+    hasBidding: false,
+    totalMoneyPerTeam: 0,
     teams: [],
   });
-  const [tournamentStep, setTournamentStep] = useState(1); // Step 1: Basic Info, Step 2: Teams, Step 3: Players
+  const [tournamentStep, setTournamentStep] = useState(1); // Step 1: Basic Info, Step 2: Teams, Step 3: Config, Step 4: Bidding
+  const [playerPricesDraft, setPlayerPricesDraft] = useState([]);
+
   const [newTeam, setNewTeam] = useState({
     name: "",
     players: [],
@@ -110,17 +114,19 @@ export default function AdminPanel() {
     fromTeamName: "",
     toTeamName: "",
   });
-
-  const tournamentTeamOptions = (selectedTournamentDetails?.teams || [])
-    .map((team) => (typeof team === "string" ? team : team?.name))
-    .filter(Boolean);
-  const selectedFromTeam = (selectedTournamentDetails?.teams || []).find((team) => {
-    const teamName = typeof team === "string" ? team : team?.name;
-    return (
-      String(teamName || "").trim().toLowerCase() ===
-      String(transferForm.fromTeamName || "").trim().toLowerCase()
-    );
-  });
+  const selectedFromTeam = (selectedTournamentDetails?.teams || []).find(
+    (team) => {
+      const teamName = typeof team === "string" ? team : team?.name;
+      return (
+        String(teamName || "")
+          .trim()
+          .toLowerCase() ===
+        String(transferForm.fromTeamName || "")
+          .trim()
+          .toLowerCase()
+      );
+    },
+  );
   const transferPlayerOptions = (() => {
     if (!selectedFromTeam || typeof selectedFromTeam === "string") return [];
     const teamPlayers = Array.isArray(selectedFromTeam.players)
@@ -132,7 +138,9 @@ export default function AdminPanel() {
           typeof playerRef === "string"
             ? playerRef
             : playerRef?._id || playerRef?.id || "";
-        const player = players.find((item) => String(item._id) === String(playerId));
+        const player = players.find(
+          (item) => String(item._id) === String(playerId),
+        );
         if (!player) return null;
         return {
           _id: player._id,
@@ -141,6 +149,14 @@ export default function AdminPanel() {
       })
       .filter(Boolean);
   })();
+
+  const tournamentTeamOptions = useMemo(() => {
+    const teams =
+      selectedTournamentDetails?.teams || selectedTournament?.teams || [];
+    return teams
+      .map((team) => (typeof team === "string" ? team : team?.name || ""))
+      .filter(Boolean);
+  }, [selectedTournamentDetails, selectedTournament]);
 
   useEffect(() => {
     if (!getToken() || !user) {
@@ -166,7 +182,9 @@ export default function AdminPanel() {
 
   const notify = (text, type = "info") => {
     setMessage(text);
-    setMessageType(type === "error" ? "error" : type === "success" ? "success" : "info");
+    setMessageType(
+      type === "error" ? "error" : type === "success" ? "success" : "info",
+    );
     pushToast({ text, type });
     pushNotification(text, type);
   };
@@ -180,7 +198,6 @@ export default function AdminPanel() {
       const data = await fetchWithAuth("/stats/admin/stats");
       setStats(data);
     } catch (error) {
-      console.error("Stats error:", error);
     }
   };
   const loadPlayers = async () => {
@@ -188,7 +205,6 @@ export default function AdminPanel() {
       const { players } = await fetchWithAuth("/players");
       setPlayers(players || []);
     } catch (error) {
-      console.error("Players error:", error);
     }
   };
   const loadTournaments = async () => {
@@ -196,7 +212,6 @@ export default function AdminPanel() {
       const { tournaments } = await fetchWithAuth("/tournaments");
       setTournaments(tournaments || []);
     } catch (error) {
-      console.error("Tournaments error:", error);
     }
   };
 
@@ -221,7 +236,9 @@ export default function AdminPanel() {
     let teamsForEdit = [];
     if (tournamentId) {
       try {
-        const data = await fetchWithAuth(`/tournaments/${tournamentId}/progression`);
+        const data = await fetchWithAuth(
+          `/tournaments/${tournamentId}/progression`,
+        );
         teamsForEdit = (data?.tournament?.teams || []).map((team) => ({
           name: team?.name || "",
           players: normalizeTeamPlayerIds(team),
@@ -272,7 +289,6 @@ export default function AdminPanel() {
       );
       setLiveMatches(live);
     } catch (error) {
-      console.error("Live matches error:", error);
     }
   };
 
@@ -327,25 +343,56 @@ export default function AdminPanel() {
     }
 
     if (tournamentStep === 2) {
-      // Validate teams and move to step 3 (or submit for non-league)
+      // Validate teams and move to step 3
       if (tempTeams.length === 0) {
         setMessage("Add at least one team.");
         setMessageType("error");
         return;
       }
 
+      // Initialize player prices draft from tempTeams
+      const initialPrices = [];
+      tempTeams.forEach((team) => {
+        (team.players || []).forEach((playerId) => {
+          initialPrices.push({
+            playerId,
+            price: 0,
+            teamName: team.name,
+          });
+        });
+      });
+      setPlayerPricesDraft(initialPrices);
+
       setTournamentStep(3);
       return;
     }
 
     if (tournamentStep === 3) {
-      // Submit tournament
+      // If bidding enabled, move to step 4. Otherwise submit.
+      if (newTournament.hasBidding) {
+        setTournamentStep(4);
+        return;
+      }
+      await submitTournament();
+      return;
+    }
+
+    if (tournamentStep === 4) {
+      // Submit tournament with bidding
       await submitTournament();
     }
   };
 
   const submitTournament = async () => {
     try {
+      // Build player prices array from draft
+      const playerPrices = playerPricesDraft
+        .filter((item) => item.price > 0)
+        .map((item) => ({
+          playerId: item.playerId,
+          price: item.price,
+        }));
+
       const tournamentData = {
         ...newTournament,
         scoreWinPoints: 3,
@@ -356,6 +403,7 @@ export default function AdminPanel() {
           players: team.players,
           captain: team.players[0] || null,
         })),
+        playerPrices,
       };
 
       await fetchWithAuth("/tournaments", {
@@ -378,8 +426,12 @@ export default function AdminPanel() {
         knockoutRound: "semi",
         groupQualifiedCount: 2,
         includeThirdPlaceMatch: false,
+        hasBidding: false,
+        totalMoneyPerTeam: 0,
         teams: [],
       });
+      setPlayerPricesDraft([]);
+
       setTempTeams([]);
       setNewTeam({ name: "", players: [] });
       loadTournaments();
@@ -456,7 +508,10 @@ export default function AdminPanel() {
       return;
     }
 
-    if (currentTeamPlayers.length >= 11 || otherTeamPlayers.includes(playerId)) {
+    if (
+      currentTeamPlayers.length >= 11 ||
+      otherTeamPlayers.includes(playerId)
+    ) {
       return;
     }
 
@@ -519,19 +574,23 @@ export default function AdminPanel() {
   };
 
   const handleEndMatch = async (matchId) => {
-    openConfirm("Finish match", "Are you sure you want to end this match?", async () => {
-      try {
-        await fetchWithAuth(`/matches/${matchId}/status`, {
-          method: "PATCH",
-          body: JSON.stringify({ status: "finished" }),
-        });
-        await loadLiveMatches();
-        setSelectedLiveMatch(null);
-        notify("Match ended successfully", "success");
-      } catch (error) {
-        notify(error.message, "error");
-      }
-    });
+    openConfirm(
+      "Finish match",
+      "Are you sure you want to end this match?",
+      async () => {
+        try {
+          await fetchWithAuth(`/matches/${matchId}/status`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: "finished" }),
+          });
+          await loadLiveMatches();
+          setSelectedLiveMatch(null);
+          notify("Match ended successfully", "success");
+        } catch (error) {
+          notify(error.message, "error");
+        }
+      },
+    );
   };
 
   const loadTournamentDetails = async (tournamentId) => {
@@ -689,7 +748,8 @@ export default function AdminPanel() {
     }
     if (
       manualFixtureForm.status === "finished" &&
-      (manualFixtureForm.scoreTeamA === "" || manualFixtureForm.scoreTeamB === "")
+      (manualFixtureForm.scoreTeamA === "" ||
+        manualFixtureForm.scoreTeamB === "")
     ) {
       setMessage("Enter the final score for an old match record.");
       setMessageType("error");
@@ -738,9 +798,12 @@ export default function AdminPanel() {
         : "Delete this fixture permanently?",
       async () => {
         try {
-          await fetchWithAuth(`/tournaments/${tournamentId}/fixtures/${fixtureId}`, {
-            method: "DELETE",
-          });
+          await fetchWithAuth(
+            `/tournaments/${tournamentId}/fixtures/${fixtureId}`,
+            {
+              method: "DELETE",
+            },
+          );
           await Promise.all([
             loadTournamentDetails(tournamentId),
             loadTournaments(),
@@ -862,19 +925,37 @@ export default function AdminPanel() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-sm font-semibold">Quick Actions</p>
-            <p className="text-xs opacity-60">Jump to common admin tasks faster.</p>
+            <p className="text-xs opacity-60">
+              Jump to common admin tasks faster.
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn btn-sm btn-success" onClick={() => setShowAddPlayerModal(true)}>
+            <button
+              type="button"
+              className="btn btn-sm btn-success"
+              onClick={() => setShowAddPlayerModal(true)}
+            >
               Add Player
             </button>
-            <button type="button" className="btn btn-sm btn-warning" onClick={() => setShowAddTournamentModal(true)}>
+            <button
+              type="button"
+              className="btn btn-sm btn-warning"
+              onClick={() => setShowAddTournamentModal(true)}
+            >
               Create Tournament
             </button>
-            <button type="button" className="btn btn-sm btn-primary" onClick={() => setActiveAdminTab("live")}>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => setActiveAdminTab("live")}
+            >
               Go Live Matches
             </button>
-            <button type="button" className="btn btn-sm btn-outline" onClick={() => setActiveAdminTab("tournaments")}>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              onClick={() => setActiveAdminTab("tournaments")}
+            >
               Go Tournament Control
             </button>
           </div>
@@ -882,21 +963,38 @@ export default function AdminPanel() {
       </div>
 
       <div className="tabs tabs-boxed w-fit">
-        <button type="button" className={`tab ${activeAdminTab === "all" ? "tab-active" : ""}`} onClick={() => setActiveAdminTab("all")}>
+        <button
+          type="button"
+          className={`tab ${activeAdminTab === "all" ? "tab-active" : ""}`}
+          onClick={() => setActiveAdminTab("all")}
+        >
           All
         </button>
-        <button type="button" className={`tab ${activeAdminTab === "overview" ? "tab-active" : ""}`} onClick={() => setActiveAdminTab("overview")}>
+        <button
+          type="button"
+          className={`tab ${activeAdminTab === "overview" ? "tab-active" : ""}`}
+          onClick={() => setActiveAdminTab("overview")}
+        >
           Overview
         </button>
-        <button type="button" className={`tab ${activeAdminTab === "tournaments" ? "tab-active" : ""}`} onClick={() => setActiveAdminTab("tournaments")}>
+        <button
+          type="button"
+          className={`tab ${activeAdminTab === "tournaments" ? "tab-active" : ""}`}
+          onClick={() => setActiveAdminTab("tournaments")}
+        >
           Tournament Control
         </button>
-        <button type="button" className={`tab ${activeAdminTab === "live" ? "tab-active" : ""}`} onClick={() => setActiveAdminTab("live")}>
+        <button
+          type="button"
+          className={`tab ${activeAdminTab === "live" ? "tab-active" : ""}`}
+          onClick={() => setActiveAdminTab("live")}
+        >
           Live Matches
         </button>
       </div>
       <p className="text-sm opacity-70 -mt-4">
-        {activeAdminTab === "all" && "All sections in one view for full control."}
+        {activeAdminTab === "all" &&
+          "All sections in one view for full control."}
         {activeAdminTab === "overview" &&
           "Manage players and tournaments quickly from summary tables."}
         {activeAdminTab === "tournaments" &&
@@ -941,7 +1039,9 @@ export default function AdminPanel() {
                 <div className="flex justify-between">
                   <div>
                     <p className="text-xs opacity-60">{s.title}</p>
-                    <p className={`text-3xl font-mono font-bold mt-2 ${s.color}`}>
+                    <p
+                      className={`text-3xl font-mono font-bold mt-2 ${s.color}`}
+                    >
                       {s.value}
                     </p>
                   </div>
@@ -952,887 +1052,903 @@ export default function AdminPanel() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
-          <h2 className="text-2xl font-bold mb-4">
-            Players ({players.length})
-          </h2>
-          <button
-            className="btn btn-success btn-sm mb-4"
-            onClick={() => setShowAddPlayerModal(true)}
-          >
-            <Plus className="w-4" />
-            Add
-          </button>
-          <div className="overflow-auto max-h-80 rounded-lg border border-white/10">
-            <table className="table table-sm">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>ID</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {players.map((p) => (
-                  <tr key={p._id}>
-                    <td>{p.name}</td>
-                    <td className="font-mono text-xs">{p.playerId}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-outline"
-                        onClick={() => openPlayerEdit(p)}
-                      >
-                        <Pencil className="w-3 h-3" />
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {!players.length && (
-                  <tr>
-                    <td colSpan="3" className="text-center py-8 opacity-50">
-                      No players
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+            <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
+              <h2 className="text-2xl font-bold mb-4">
+                Players ({players.length})
+              </h2>
+              <button
+                className="btn btn-success btn-sm mb-4"
+                onClick={() => setShowAddPlayerModal(true)}
+              >
+                <Plus className="w-4" />
+                Add
+              </button>
+              <div className="overflow-auto max-h-80 rounded-lg border border-white/10">
+                <table className="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>ID</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {players.map((p) => (
+                      <tr key={p._id}>
+                        <td>{p.name}</td>
+                        <td className="font-mono text-xs">{p.playerId}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-outline"
+                            onClick={() => openPlayerEdit(p)}
+                          >
+                            <Pencil className="w-3 h-3" />
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!players.length && (
+                      <tr>
+                        <td colSpan="3" className="text-center py-8 opacity-50">
+                          No players
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-        <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
-          <h2 className="text-2xl font-bold mb-4">
-            Tournaments ({tournaments.length})
-          </h2>
-          <button
-            className="btn btn-warning btn-sm mb-4"
-            onClick={() => setShowAddTournamentModal(true)}
-          >
-            <Plus className="w-4" />
-            Create
-          </button>
-          <div className="overflow-auto max-h-80 rounded-lg border border-white/10">
-            <table className="table table-sm">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tournaments.map((t) => (
-                  <tr key={t._id || t.id || t.name}>
-                    <td>{t.name}</td>
-                    <td className="text-xs capitalize">{t.type}</td>
-                    <td>
-                      <span className="badge badge-xs">{t.status}</span>
-                    </td>
-                    <td className="text-right">
-                      <button
-                        className="btn btn-xs btn-ghost"
-                        onClick={() => handleOpenEditTeams(t)}
-                      >
-                        Edit Teams
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {!tournaments.length && (
-                  <tr>
-                    <td colSpan="3" className="text-center py-8 opacity-50">
-                      No tournaments
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+            <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
+              <h2 className="text-2xl font-bold mb-4">
+                Tournaments ({tournaments.length})
+              </h2>
+              <button
+                className="btn btn-warning btn-sm mb-4"
+                onClick={() => setShowAddTournamentModal(true)}
+              >
+                <Plus className="w-4" />
+                Create
+              </button>
+              <div className="overflow-auto max-h-80 rounded-lg border border-white/10">
+                <table className="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tournaments.map((t) => (
+                      <tr key={t._id || t.id || t.name}>
+                        <td>{t.name}</td>
+                        <td className="text-xs capitalize">{t.type}</td>
+                        <td>
+                          <span className="badge badge-xs">{t.status}</span>
+                        </td>
+                        <td className="text-right">
+                          <button
+                            className="btn btn-xs btn-ghost"
+                            onClick={() => handleOpenEditTeams(t)}
+                          >
+                            Edit Teams
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!tournaments.length && (
+                      <tr>
+                        <td colSpan="3" className="text-center py-8 opacity-50">
+                          No tournaments
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </>
       )}
 
       {(activeAdminTab === "all" || activeAdminTab === "tournaments") && (
         <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-2xl font-bold flex items-center gap-2">
-              <Trophy className="w-6 h-6 text-warning" />
-              Tournament Match Control
-            </h2>
-            <p className="text-sm opacity-70 mt-1">
-              Generate fixtures, set tournament live status, and schedule each
-              tournament match from here.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn btn-outline btn-sm"
-            onClick={() =>
-              selectedTournament
-                ? loadTournamentDetails(
-                    selectedTournament._id || selectedTournament.id,
-                  )
-                : loadTournaments()
-            }
-          >
-            <RefreshCw className="w-4" />
-            Refresh
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-[320px,1fr] gap-6">
-          <div className="space-y-3">
-            {tournaments.length > 0 ? (
-              tournaments.map((tournament) => {
-                const isActive =
-                  (selectedTournament?._id || selectedTournament?.id) ===
-                  (tournament._id || tournament.id);
-                return (
-                  <button
-                    key={tournament._id || tournament.id}
-                    type="button"
-                    onClick={() => handleTournamentSelect(tournament)}
-                    className={`w-full rounded-lg border p-4 text-left transition ${
-                      isActive
-                        ? "border-warning bg-warning/10"
-                        : "border-white/10 bg-base-200/30 hover:border-warning/40"
-                    }`}
-                  >
-                    <div className="font-semibold">{tournament.name}</div>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                      <span className="badge badge-outline">
-                        {tournament.type}
-                      </span>
-                      <span className="badge badge-ghost">
-                        {tournament.teamCount || tournament.teams?.length || 0}{" "}
-                        teams
-                      </span>
-                      <span className="badge badge-ghost">
-                        {tournament.matchCount || 0} fixtures
-                      </span>
-                    </div>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="rounded-lg border border-dashed border-white/10 p-6 text-sm opacity-60">
-                No tournaments available yet.
-              </div>
-            )}
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <Trophy className="w-6 h-6 text-warning" />
+                Tournament Match Control
+              </h2>
+              <p className="text-sm opacity-70 mt-1">
+                Generate fixtures, set tournament live status, and schedule each
+                tournament match from here.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() =>
+                selectedTournament
+                  ? loadTournamentDetails(
+                      selectedTournament._id || selectedTournament.id,
+                    )
+                  : loadTournaments()
+              }
+            >
+              <RefreshCw className="w-4" />
+              Refresh
+            </button>
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-base-200/20 p-5">
-            {!selectedTournament ? (
-              <div className="py-12 text-center opacity-60">
-                Select a tournament to manage its fixtures.
-              </div>
-            ) : tournamentLoading ? (
-              <div className="py-12 text-center">
-                <span className="loading loading-spinner loading-md"></span>
-              </div>
-            ) : (
-              <div className="space-y-5">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div>
-                    <h3 className="text-xl font-bold">
-                      {selectedTournamentDetails?.name ||
-                        selectedTournament.name}
-                    </h3>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                      <span className="badge badge-outline">
-                        {selectedTournamentDetails?.type ||
-                          selectedTournament.type}
-                      </span>
-                      <span className="badge badge-ghost">
-                        {selectedTournamentDetails?.teams?.length ||
-                          selectedTournament.teamCount ||
-                          0}{" "}
-                        teams
-                      </span>
-                      <span className="badge badge-ghost">
-                        {tournamentFixtures.length} fixtures
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <label htmlFor="tournament-status" className="sr-only">
-                      Tournament status
-                    </label>
-                    <select
-                      id="tournament-status"
-                      name="tournamentStatus"
-                      className="select select-bordered select-sm"
-                      value={tournamentStatusDraft}
-                      onChange={(e) => setTournamentStatusDraft(e.target.value)}
-                    >
-                      <option value="upcoming">Upcoming</option>
-                      <option value="live">Live</option>
-                      <option value="finished">Finished</option>
-                    </select>
+          <div className="grid grid-cols-1 xl:grid-cols-[320px,1fr] gap-6">
+            <div className="space-y-3">
+              {tournaments.length > 0 ? (
+                tournaments.map((tournament) => {
+                  const isActive =
+                    (selectedTournament?._id || selectedTournament?.id) ===
+                    (tournament._id || tournament.id);
+                  return (
                     <button
+                      key={tournament._id || tournament.id}
                       type="button"
-                      className="btn btn-success btn-sm"
-                      onClick={handleTournamentStatusUpdate}
+                      onClick={() => handleTournamentSelect(tournament)}
+                      className={`w-full rounded-lg border p-4 text-left transition ${
+                        isActive
+                          ? "border-warning bg-warning/10"
+                          : "border-white/10 bg-base-200/30 hover:border-warning/40"
+                      }`}
                     >
-                      Save Status
+                      <div className="font-semibold">{tournament.name}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        <span className="badge badge-outline">
+                          {tournament.type}
+                        </span>
+                        <span className="badge badge-ghost">
+                          {tournament.teamCount ||
+                            tournament.teams?.length ||
+                            0}{" "}
+                          teams
+                        </span>
+                        <span className="badge badge-ghost">
+                          {tournament.matchCount || 0} fixtures
+                        </span>
+                      </div>
                     </button>
-                  </div>
+                  );
+                })
+              ) : (
+                <div className="rounded-lg border border-dashed border-white/10 p-6 text-sm opacity-60">
+                  No tournaments available yet.
                 </div>
+              )}
+            </div>
 
-                <div className="rounded-lg border border-white/10 bg-base-100/40 p-4 space-y-4">
-                  <div>
-                    <h4 className="font-semibold">Add Fixture Manually</h4>
-                    <p className="text-xs opacity-60 mt-1">
-                      Use this for future fixtures or to add an old match record
-                      that was already played before you started using this
-                      project.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+            <div className="rounded-xl border border-white/10 bg-base-200/20 p-5">
+              {!selectedTournament ? (
+                <div className="py-12 text-center opacity-60">
+                  Select a tournament to manage its fixtures.
+                </div>
+              ) : tournamentLoading ? (
+                <div className="py-12 text-center">
+                  <span className="loading loading-spinner loading-md"></span>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div>
-                      <label
-                        htmlFor="manual-fixture-team-a"
-                        className="text-xs opacity-70 block mb-1"
-                      >
-                        Team A
+                      <h3 className="text-xl font-bold">
+                        {selectedTournamentDetails?.name ||
+                          selectedTournament.name}
+                      </h3>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        <span className="badge badge-outline">
+                          {selectedTournamentDetails?.type ||
+                            selectedTournament.type}
+                        </span>
+                        <span className="badge badge-ghost">
+                          {selectedTournamentDetails?.teams?.length ||
+                            selectedTournament.teamCount ||
+                            0}{" "}
+                          teams
+                        </span>
+                        <span className="badge badge-ghost">
+                          {tournamentFixtures.length} fixtures
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <label htmlFor="tournament-status" className="sr-only">
+                        Tournament status
                       </label>
                       <select
-                        id="manual-fixture-team-a"
-                        name="manualFixtureTeamA"
-                        className="select select-bordered w-full"
-                        value={manualFixtureForm.teamAName}
+                        id="tournament-status"
+                        name="tournamentStatus"
+                        className="select select-bordered select-sm"
+                        value={tournamentStatusDraft}
                         onChange={(e) =>
-                          setManualFixtureForm((current) => ({
-                            ...current,
-                            teamAName: e.target.value,
-                          }))
-                        }
-                      >
-                        <option value="">Select Team A</option>
-                        {tournamentTeamOptions.map((teamName) => (
-                          <option key={`a-${teamName}`} value={teamName}>
-                            {teamName}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor="manual-fixture-team-b"
-                        className="text-xs opacity-70 block mb-1"
-                      >
-                        Team B
-                      </label>
-                      <select
-                        id="manual-fixture-team-b"
-                        name="manualFixtureTeamB"
-                        className="select select-bordered w-full"
-                        value={manualFixtureForm.teamBName}
-                        onChange={(e) =>
-                          setManualFixtureForm((current) => ({
-                            ...current,
-                            teamBName: e.target.value,
-                          }))
-                        }
-                      >
-                        <option value="">Select Team B</option>
-                        {tournamentTeamOptions.map((teamName) => (
-                          <option key={`b-${teamName}`} value={teamName}>
-                            {teamName}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor="manual-fixture-phase"
-                        className="text-xs opacity-70 block mb-1"
-                      >
-                        Phase
-                      </label>
-                      <input
-                        id="manual-fixture-phase"
-                        name="manualFixturePhase"
-                        type="text"
-                        className="input input-bordered w-full"
-                        placeholder="Phase"
-                        value={manualFixtureForm.phase}
-                        onChange={(e) =>
-                          setManualFixtureForm((current) => ({
-                            ...current,
-                            phase: e.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor="manual-fixture-scheduled-at"
-                        className="text-xs opacity-70 block mb-1"
-                      >
-                        Kickoff time
-                      </label>
-                      <input
-                        id="manual-fixture-scheduled-at"
-                        name="manualFixtureScheduledAt"
-                        type="datetime-local"
-                        className="input input-bordered w-full"
-                        value={manualFixtureForm.scheduledAt}
-                        onChange={(e) =>
-                          setManualFixtureForm((current) => ({
-                            ...current,
-                            scheduledAt: e.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor="manual-fixture-status"
-                        className="text-xs opacity-70 block mb-1"
-                      >
-                        Status
-                      </label>
-                      <select
-                        id="manual-fixture-status"
-                        name="manualFixtureStatus"
-                        className="select select-bordered w-full"
-                        value={manualFixtureForm.status}
-                        onChange={(e) =>
-                          setManualFixtureForm((current) => ({
-                            ...current,
-                            status: e.target.value,
-                          }))
+                          setTournamentStatusDraft(e.target.value)
                         }
                       >
                         <option value="upcoming">Upcoming</option>
                         <option value="live">Live</option>
                         <option value="finished">Finished</option>
                       </select>
+                      <button
+                        type="button"
+                        className="btn btn-success btn-sm"
+                        onClick={handleTournamentStatusUpdate}
+                      >
+                        Save Status
+                      </button>
                     </div>
                   </div>
 
-                  {manualFixtureForm.status === "finished" && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div>
-                        <label
-                          htmlFor="manual-fixture-score-team-a"
-                          className="text-xs opacity-70 block mb-1"
-                        >
-                          {manualFixtureForm.teamAName || "Team A"} score
-                        </label>
-                        <input
-                          id="manual-fixture-score-team-a"
-                          type="number"
-                          min="0"
-                          className="input input-bordered w-full"
-                          value={manualFixtureForm.scoreTeamA}
-                          onChange={(e) =>
-                            setManualFixtureForm((current) => ({
-                              ...current,
-                              scoreTeamA: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-
-                      <div>
-                        <label
-                          htmlFor="manual-fixture-score-team-b"
-                          className="text-xs opacity-70 block mb-1"
-                        >
-                          {manualFixtureForm.teamBName || "Team B"} score
-                        </label>
-                        <input
-                          id="manual-fixture-score-team-b"
-                          type="number"
-                          min="0"
-                          className="input input-bordered w-full"
-                          value={manualFixtureForm.scoreTeamB}
-                          onChange={(e) =>
-                            setManualFixtureForm((current) => ({
-                              ...current,
-                              scoreTeamB: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
+                  <div className="rounded-lg border border-white/10 bg-base-100/40 p-4 space-y-4">
+                    <div>
+                      <h4 className="font-semibold">Add Fixture Manually</h4>
+                      <p className="text-xs opacity-60 mt-1">
+                        Use this for future fixtures or to add an old match
+                        record that was already played before you started using
+                        this project.
+                      </p>
                     </div>
-                  )}
 
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={handleCreateManualFixture}
-                  >
-                    <Plus className="w-4" />
-                    {manualFixtureForm.status === "finished"
-                      ? "Add Old Match Record"
-                      : "Add Fixture"}
-                  </button>
-                </div>
-
-                <div className="rounded-lg border border-white/10 bg-base-100/40 p-4 space-y-3">
-                  <h4 className="font-semibold">League Player Transfer</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                    <select
-                      className="select select-bordered select-sm"
-                      value={transferForm.playerId}
-                      onChange={(e) =>
-                        setTransferForm({ ...transferForm, playerId: e.target.value })
-                      }
-                      disabled={!transferForm.fromTeamName}
-                    >
-                      <option value="">
-                        {transferForm.fromTeamName
-                          ? "Select player"
-                          : "Select from team first"}
-                      </option>
-                      {transferPlayerOptions.map((player) => (
-                        <option key={`transfer-player-${player._id}`} value={player._id}>
-                          {player.label}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="select select-bordered select-sm"
-                      value={transferForm.fromTeamName}
-                      onChange={(e) =>
-                        setTransferForm({
-                          ...transferForm,
-                          fromTeamName: e.target.value,
-                          playerId: "",
-                        })
-                      }
-                    >
-                      <option value="">From team</option>
-                      {tournamentTeamOptions.map((teamName) => (
-                        <option key={`from-${teamName}`} value={teamName}>
-                          {teamName}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="select select-bordered select-sm"
-                      value={transferForm.toTeamName}
-                      onChange={(e) =>
-                        setTransferForm({ ...transferForm, toTeamName: e.target.value })
-                      }
-                    >
-                      <option value="">To team</option>
-                      {tournamentTeamOptions.map((teamName) => (
-                        <option key={`to-${teamName}`} value={teamName}>
-                          {teamName}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="btn btn-warning btn-sm"
-                      onClick={handleTransferLeaguePlayer}
-                    >
-                      Transfer
-                    </button>
-                  </div>
-                </div>
-
-                {tournamentFixtures.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-white/10 p-6 text-sm opacity-70 space-y-4">
-                    <p>
-                      This tournament has no fixtures yet. Set the first kickoff
-                      time below and generate the tournament schedule.
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="md:col-span-2">
-                        <label
-                          htmlFor="fixture-generation-start-date"
-                          className="text-xs opacity-70 block mb-1"
-                        >
-                          First fixture kickoff
-                        </label>
-                        <input
-                          id="fixture-generation-start-date"
-                          name="fixtureGenerationStartDate"
-                          type="datetime-local"
-                          className="input input-bordered w-full"
-                          value={fixtureGenerationForm.startDate}
-                          onChange={(e) =>
-                            setFixtureGenerationForm((current) => ({
-                              ...current,
-                              startDate: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
                       <div>
                         <label
-                          htmlFor="fixture-generation-interval-hours"
+                          htmlFor="manual-fixture-team-a"
                           className="text-xs opacity-70 block mb-1"
                         >
-                          Gap in hours
-                        </label>
-                        <input
-                          id="fixture-generation-interval-hours"
-                          name="fixtureGenerationIntervalHours"
-                          type="number"
-                          min="1"
-                          className="input input-bordered w-full"
-                          value={fixtureGenerationForm.intervalHours}
-                          onChange={(e) =>
-                            setFixtureGenerationForm((current) => ({
-                              ...current,
-                              intervalHours: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                    </div>
-                    {(selectedTournamentDetails?.type || selectedTournament?.type) ===
-                      "league" && (
-                      <div>
-                        <label
-                          htmlFor="fixture-generation-mode"
-                          className="text-xs opacity-70 block mb-1"
-                        >
-                          Fixture order
+                          Team A
                         </label>
                         <select
-                          id="fixture-generation-mode"
+                          id="manual-fixture-team-a"
+                          name="manualFixtureTeamA"
                           className="select select-bordered w-full"
-                          value={fixtureGenerationForm.generationMode}
+                          value={manualFixtureForm.teamAName}
                           onChange={(e) =>
-                            setFixtureGenerationForm((current) => ({
+                            setManualFixtureForm((current) => ({
                               ...current,
-                              generationMode: e.target.value,
+                              teamAName: e.target.value,
                             }))
                           }
                         >
-                          <option value="rounds">Round by round</option>
-                          <option value="sequential">
-                            Sequential pairs (A-B, A-C, B-C)
-                          </option>
+                          <option value="">Select Team A</option>
+                          {tournamentTeamOptions.map((teamName) => (
+                            <option key={`a-${teamName}`} value={teamName}>
+                              {teamName}
+                            </option>
+                          ))}
                         </select>
                       </div>
+
+                      <div>
+                        <label
+                          htmlFor="manual-fixture-team-b"
+                          className="text-xs opacity-70 block mb-1"
+                        >
+                          Team B
+                        </label>
+                        <select
+                          id="manual-fixture-team-b"
+                          name="manualFixtureTeamB"
+                          className="select select-bordered w-full"
+                          value={manualFixtureForm.teamBName}
+                          onChange={(e) =>
+                            setManualFixtureForm((current) => ({
+                              ...current,
+                              teamBName: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Select Team B</option>
+                          {tournamentTeamOptions.map((teamName) => (
+                            <option key={`b-${teamName}`} value={teamName}>
+                              {teamName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="manual-fixture-phase"
+                          className="text-xs opacity-70 block mb-1"
+                        >
+                          Phase
+                        </label>
+                        <input
+                          id="manual-fixture-phase"
+                          name="manualFixturePhase"
+                          type="text"
+                          className="input input-bordered w-full"
+                          placeholder="Phase"
+                          value={manualFixtureForm.phase}
+                          onChange={(e) =>
+                            setManualFixtureForm((current) => ({
+                              ...current,
+                              phase: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="manual-fixture-scheduled-at"
+                          className="text-xs opacity-70 block mb-1"
+                        >
+                          Kickoff time
+                        </label>
+                        <input
+                          id="manual-fixture-scheduled-at"
+                          name="manualFixtureScheduledAt"
+                          type="datetime-local"
+                          className="input input-bordered w-full"
+                          value={manualFixtureForm.scheduledAt}
+                          onChange={(e) =>
+                            setManualFixtureForm((current) => ({
+                              ...current,
+                              scheduledAt: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="manual-fixture-status"
+                          className="text-xs opacity-70 block mb-1"
+                        >
+                          Status
+                        </label>
+                        <select
+                          id="manual-fixture-status"
+                          name="manualFixtureStatus"
+                          className="select select-bordered w-full"
+                          value={manualFixtureForm.status}
+                          onChange={(e) =>
+                            setManualFixtureForm((current) => ({
+                              ...current,
+                              status: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="upcoming">Upcoming</option>
+                          <option value="live">Live</option>
+                          <option value="finished">Finished</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {manualFixtureForm.status === "finished" && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label
+                            htmlFor="manual-fixture-score-team-a"
+                            className="text-xs opacity-70 block mb-1"
+                          >
+                            {manualFixtureForm.teamAName || "Team A"} score
+                          </label>
+                          <input
+                            id="manual-fixture-score-team-a"
+                            type="number"
+                            min="0"
+                            className="input input-bordered w-full"
+                            value={manualFixtureForm.scoreTeamA}
+                            onChange={(e) =>
+                              setManualFixtureForm((current) => ({
+                                ...current,
+                                scoreTeamA: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+
+                        <div>
+                          <label
+                            htmlFor="manual-fixture-score-team-b"
+                            className="text-xs opacity-70 block mb-1"
+                          >
+                            {manualFixtureForm.teamBName || "Team B"} score
+                          </label>
+                          <input
+                            id="manual-fixture-score-team-b"
+                            type="number"
+                            min="0"
+                            className="input input-bordered w-full"
+                            value={manualFixtureForm.scoreTeamB}
+                            onChange={(e) =>
+                              setManualFixtureForm((current) => ({
+                                ...current,
+                                scoreTeamB: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
                     )}
+
                     <button
                       type="button"
-                      className="btn btn-warning btn-sm"
-                      onClick={handleGenerateTournamentFixtures}
-                      disabled={isGeneratingFixtures}
+                      className="btn btn-primary btn-sm"
+                      onClick={handleCreateManualFixture}
                     >
-                      <RefreshCw className="w-4" />
-                      {isGeneratingFixtures
-                        ? "Generating fixtures..."
-                        : "Generate Fixtures"}
+                      <Plus className="w-4" />
+                      {manualFixtureForm.status === "finished"
+                        ? "Add Old Match Record"
+                        : "Add Fixture"}
                     </button>
                   </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="rounded-lg bg-base-100/50 p-4">
-                        <div className="text-xs opacity-60">Upcoming</div>
-                        <div className="text-2xl font-bold">
-                          {upcomingTournamentFixtures.length}
-                        </div>
-                      </div>
-                      <div className="rounded-lg bg-base-100/50 p-4">
-                        <div className="text-xs opacity-60">Live</div>
-                        <div className="text-2xl font-bold text-success">
-                          {liveTournamentFixtures.length}
-                        </div>
-                      </div>
-                      <div className="rounded-lg bg-base-100/50 p-4">
-                        <div className="text-xs opacity-60">Finished</div>
-                        <div className="text-2xl font-bold">
-                          {finishedTournamentFixtures.length}
-                        </div>
-                      </div>
+
+                  <div className="rounded-lg border border-white/10 bg-base-100/40 p-4 space-y-3">
+                    <h4 className="font-semibold">League Player Transfer</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                      <select
+                        className="select select-bordered select-sm"
+                        value={transferForm.playerId}
+                        onChange={(e) =>
+                          setTransferForm({
+                            ...transferForm,
+                            playerId: e.target.value,
+                          })
+                        }
+                        disabled={!transferForm.fromTeamName}
+                      >
+                        <option value="">
+                          {transferForm.fromTeamName
+                            ? "Select player"
+                            : "Select from team first"}
+                        </option>
+                        {transferPlayerOptions.map((player) => (
+                          <option
+                            key={`transfer-player-${player._id}`}
+                            value={player._id}
+                          >
+                            {player.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="select select-bordered select-sm"
+                        value={transferForm.fromTeamName}
+                        onChange={(e) =>
+                          setTransferForm({
+                            ...transferForm,
+                            fromTeamName: e.target.value,
+                            playerId: "",
+                          })
+                        }
+                      >
+                        <option value="">From team</option>
+                        {tournamentTeamOptions.map((teamName) => (
+                          <option key={`from-${teamName}`} value={teamName}>
+                            {teamName}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="select select-bordered select-sm"
+                        value={transferForm.toTeamName}
+                        onChange={(e) =>
+                          setTransferForm({
+                            ...transferForm,
+                            toTeamName: e.target.value,
+                          })
+                        }
+                      >
+                        <option value="">To team</option>
+                        {tournamentTeamOptions.map((teamName) => (
+                          <option key={`to-${teamName}`} value={teamName}>
+                            {teamName}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn btn-warning btn-sm"
+                        onClick={handleTransferLeaguePlayer}
+                      >
+                        Transfer
+                      </button>
                     </div>
+                  </div>
 
-                    <div className="space-y-3">
-                      {tournamentFixtures.map((fixture) => (
-                        <div
-                          key={fixture.id}
-                          className="rounded-lg border border-white/10 bg-base-100/40 p-4"
-                        >
-                          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-                            <div>
-                              <div className="font-semibold">
-                                {fixture.teamA} vs {fixture.teamB}
-                              </div>
-                              <div className="text-xs opacity-60 mt-1">
-                                {fixture.phase}
-                                {" • "}
-                                {fixture.scheduledAt
-                                  ? new Date(
-                                      fixture.scheduledAt,
-                                    ).toLocaleString()
-                                  : "No schedule set"}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <label
-                                htmlFor={`fixture-scheduled-at-${fixture.id}`}
-                                className="sr-only"
-                              >
-                                Schedule for {fixture.teamA} vs {fixture.teamB}
-                              </label>
-                              <input
-                                id={`fixture-scheduled-at-${fixture.id}`}
-                                name={`fixtureScheduledAt-${fixture.id}`}
-                                type="datetime-local"
-                                className="input input-bordered input-sm"
-                                value={fixtureScheduleDrafts[fixture.id] || ""}
-                                onChange={(e) =>
-                                  setFixtureScheduleDrafts((current) => ({
-                                    ...current,
-                                    [fixture.id]: e.target.value,
-                                  }))
-                                }
-                              />
-                              <button
-                                type="button"
-                                className="btn btn-outline btn-sm"
-                                onClick={() =>
-                                  handleFixtureScheduleUpdate(fixture.id)
-                                }
-                              >
-                                Set Fixture
-                              </button>
-                              <span
-                                className={`badge ${
-                                  fixture.status === "live"
-                                    ? "badge-success"
-                                    : fixture.status === "finished"
-                                      ? "badge-secondary"
-                                      : "badge-warning"
-                                }`}
-                              >
-                                {fixture.status}
-                              </span>
-
-                              {fixture.status === "upcoming" && (
-                                <button
-                                  type="button"
-                                  className="btn btn-success btn-sm"
-                                  onClick={() =>
-                                    handleStartTournamentFixture(fixture.id)
-                                  }
-                                >
-                                  <Play className="w-4" />
-                                  Start Match
-                                </button>
-                              )}
-
-                              {fixture.status === "live" && (
-                                <button
-                                  type="button"
-                                  className="btn btn-primary btn-sm"
-                                  onClick={() =>
-                                    handleOpenTournamentLiveMatch(fixture.id)
-                                  }
-                                >
-                                  View Live Match
-                                </button>
-                              )}
-
-                              {fixture.status === "finished" &&
-                                fixture.result && (
-                                  <>
-                                    <span className="text-sm font-mono">
-                                      {fixture.result}
-                                    </span>
-                                  </>
-                                )}
-                              <button
-                                type="button"
-                                className="btn btn-error btn-xs"
-                                onClick={() =>
-                                  handleDeleteTournamentFixture(
-                                    fixture.id,
-                                    fixture.status,
-                                  )
-                                }
-                              >
-                                Delete Fixture
-                              </button>
-                            </div>
+                  {tournamentFixtures.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-white/10 p-6 text-sm opacity-70 space-y-4">
+                      <p>
+                        This tournament has no fixtures yet. Set the first
+                        kickoff time below and generate the tournament schedule.
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="md:col-span-2">
+                          <label
+                            htmlFor="fixture-generation-start-date"
+                            className="text-xs opacity-70 block mb-1"
+                          >
+                            First fixture kickoff
+                          </label>
+                          <input
+                            id="fixture-generation-start-date"
+                            name="fixtureGenerationStartDate"
+                            type="datetime-local"
+                            className="input input-bordered w-full"
+                            value={fixtureGenerationForm.startDate}
+                            onChange={(e) =>
+                              setFixtureGenerationForm((current) => ({
+                                ...current,
+                                startDate: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label
+                            htmlFor="fixture-generation-interval-hours"
+                            className="text-xs opacity-70 block mb-1"
+                          >
+                            Gap in hours
+                          </label>
+                          <input
+                            id="fixture-generation-interval-hours"
+                            name="fixtureGenerationIntervalHours"
+                            type="number"
+                            min="1"
+                            className="input input-bordered w-full"
+                            value={fixtureGenerationForm.intervalHours}
+                            onChange={(e) =>
+                              setFixtureGenerationForm((current) => ({
+                                ...current,
+                                intervalHours: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                      {(selectedTournamentDetails?.type ||
+                        selectedTournament?.type) === "league" && (
+                        <div>
+                          <label
+                            htmlFor="fixture-generation-mode"
+                            className="text-xs opacity-70 block mb-1"
+                          >
+                            Fixture order
+                          </label>
+                          <select
+                            id="fixture-generation-mode"
+                            className="select select-bordered w-full"
+                            value={fixtureGenerationForm.generationMode}
+                            onChange={(e) =>
+                              setFixtureGenerationForm((current) => ({
+                                ...current,
+                                generationMode: e.target.value,
+                              }))
+                            }
+                          >
+                            <option value="rounds">Round by round</option>
+                            <option value="sequential">
+                              Sequential pairs (A-B, A-C, B-C)
+                            </option>
+                          </select>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-warning btn-sm"
+                        onClick={handleGenerateTournamentFixtures}
+                        disabled={isGeneratingFixtures}
+                      >
+                        <RefreshCw className="w-4" />
+                        {isGeneratingFixtures
+                          ? "Generating fixtures..."
+                          : "Generate Fixtures"}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="rounded-lg bg-base-100/50 p-4">
+                          <div className="text-xs opacity-60">Upcoming</div>
+                          <div className="text-2xl font-bold">
+                            {upcomingTournamentFixtures.length}
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+                        <div className="rounded-lg bg-base-100/50 p-4">
+                          <div className="text-xs opacity-60">Live</div>
+                          <div className="text-2xl font-bold text-success">
+                            {liveTournamentFixtures.length}
+                          </div>
+                        </div>
+                        <div className="rounded-lg bg-base-100/50 p-4">
+                          <div className="text-xs opacity-60">Finished</div>
+                          <div className="text-2xl font-bold">
+                            {finishedTournamentFixtures.length}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        {tournamentFixtures.map((fixture) => (
+                          <div
+                            key={fixture.id}
+                            className="rounded-lg border border-white/10 bg-base-100/40 p-4"
+                          >
+                            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                              <div>
+                                <div className="font-semibold">
+                                  {fixture.teamA} vs {fixture.teamB}
+                                </div>
+                                <div className="text-xs opacity-60 mt-1">
+                                  {fixture.phase}
+                                  {" • "}
+                                  {fixture.scheduledAt
+                                    ? new Date(
+                                        fixture.scheduledAt,
+                                      ).toLocaleString()
+                                    : "No schedule set"}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <label
+                                  htmlFor={`fixture-scheduled-at-${fixture.id}`}
+                                  className="sr-only"
+                                >
+                                  Schedule for {fixture.teamA} vs{" "}
+                                  {fixture.teamB}
+                                </label>
+                                <input
+                                  id={`fixture-scheduled-at-${fixture.id}`}
+                                  name={`fixtureScheduledAt-${fixture.id}`}
+                                  type="datetime-local"
+                                  className="input input-bordered input-sm"
+                                  value={
+                                    fixtureScheduleDrafts[fixture.id] || ""
+                                  }
+                                  onChange={(e) =>
+                                    setFixtureScheduleDrafts((current) => ({
+                                      ...current,
+                                      [fixture.id]: e.target.value,
+                                    }))
+                                  }
+                                />
+                                <button
+                                  type="button"
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() =>
+                                    handleFixtureScheduleUpdate(fixture.id)
+                                  }
+                                >
+                                  Set Fixture
+                                </button>
+                                <span
+                                  className={`badge ${
+                                    fixture.status === "live"
+                                      ? "badge-success"
+                                      : fixture.status === "finished"
+                                        ? "badge-secondary"
+                                        : "badge-warning"
+                                  }`}
+                                >
+                                  {fixture.status}
+                                </span>
+
+                                {fixture.status === "upcoming" && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-success btn-sm"
+                                    onClick={() =>
+                                      handleStartTournamentFixture(fixture.id)
+                                    }
+                                  >
+                                    <Play className="w-4" />
+                                    Start Match
+                                  </button>
+                                )}
+
+                                {fixture.status === "live" && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    onClick={() =>
+                                      handleOpenTournamentLiveMatch(fixture.id)
+                                    }
+                                  >
+                                    View Live Match
+                                  </button>
+                                )}
+
+                                {fixture.status === "finished" &&
+                                  fixture.result && (
+                                    <>
+                                      <span className="text-sm font-mono">
+                                        {fixture.result}
+                                      </span>
+                                    </>
+                                  )}
+                                <button
+                                  type="button"
+                                  className="btn btn-error btn-xs"
+                                  onClick={() =>
+                                    handleDeleteTournamentFixture(
+                                      fixture.id,
+                                      fixture.status,
+                                    )
+                                  }
+                                >
+                                  Delete Fixture
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
         </div>
       )}
 
       {(activeAdminTab === "all" || activeAdminTab === "live") && (
         <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <Goal className="w-6 h-6 text-success" />
-            Live Matches
-          </h2>
-          <button
-            className="btn btn-success btn-sm"
-            onClick={() => setShowCreateMatchModal(true)}
-          >
-            <Play className="w-4" />
-            Start Match
-          </button>
-        </div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold flex items-center gap-2">
+              <Goal className="w-6 h-6 text-success" />
+              Live Matches
+            </h2>
+            <button
+              className="btn btn-success btn-sm"
+              onClick={() => setShowCreateMatchModal(true)}
+            >
+              <Play className="w-4" />
+              Start Match
+            </button>
+          </div>
 
-        {liveMatches.length > 0 ? (
-          <div className="space-y-4">
-            {/* Match Selection Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {liveMatches.map((match) => (
-                <button
-                  key={match._id}
-                  type="button"
-                  onClick={() => setSelectedLiveMatch(match)}
-                  className={`p-4 rounded-lg border-2 transition text-left ${
-                    selectedLiveMatch?._id === match._id
-                      ? "border-success bg-success/10"
-                      : "border-white/10 bg-base-200/30 hover:border-success/50"
-                  }`}
-                >
-                  <div className="text-sm font-bold">
-                    {match.teams[0]?.name} vs {match.teams[1]?.name}
-                  </div>
-                  <div className="text-lg font-mono font-bold mt-2">
-                    <span className="text-primary">
-                      {match.score?.teamA || 0}
-                    </span>
-                    <span className="mx-2 opacity-50">-</span>
-                    <span className="text-secondary">
-                      {match.score?.teamB || 0}
-                    </span>
-                  </div>
-                  <div className="text-xs opacity-60 mt-2">
-                    {match.goals?.filter((g) => g.teamIndex === 0).length || 0}{" "}
-                    -{" "}
-                    {match.goals?.filter((g) => g.teamIndex === 1).length || 0}{" "}
-                    goals • {match.status}
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            {/* Selected Match Details */}
-            {selectedLiveMatch && (
-              <div className="border-t border-white/10 pt-4 space-y-4">
-                <div className="bg-base-200/50 rounded-lg p-4">
-                  <h3 className="font-bold mb-3">
-                    Match: {selectedLiveMatch.teams[0]?.name} vs{" "}
-                    {selectedLiveMatch.teams[1]?.name}
-                  </h3>
-
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div className="text-center p-3 bg-base-100/50 rounded">
-                      <div className="text-sm opacity-60">
-                        {selectedLiveMatch.teams[0]?.name}
-                      </div>
-                      <div className="text-4xl font-mono font-bold text-primary">
-                        {selectedLiveMatch.score?.teamA || 0}
-                      </div>
+          {liveMatches.length > 0 ? (
+            <div className="space-y-4">
+              {/* Match Selection Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {liveMatches.map((match) => (
+                  <button
+                    key={match._id}
+                    type="button"
+                    onClick={() => setSelectedLiveMatch(match)}
+                    className={`p-4 rounded-lg border-2 transition text-left ${
+                      selectedLiveMatch?._id === match._id
+                        ? "border-success bg-success/10"
+                        : "border-white/10 bg-base-200/30 hover:border-success/50"
+                    }`}
+                  >
+                    <div className="text-sm font-bold">
+                      {match.teams[0]?.name} vs {match.teams[1]?.name}
                     </div>
-                    <div className="text-center p-3 bg-base-100/50 rounded">
-                      <div className="text-sm opacity-60">
-                        {selectedLiveMatch.teams[1]?.name}
-                      </div>
-                      <div className="text-4xl font-mono font-bold text-secondary">
-                        {selectedLiveMatch.score?.teamB || 0}
-                      </div>
+                    <div className="text-lg font-mono font-bold mt-2">
+                      <span className="text-primary">
+                        {match.score?.teamA || 0}
+                      </span>
+                      <span className="mx-2 opacity-50">-</span>
+                      <span className="text-secondary">
+                        {match.score?.teamB || 0}
+                      </span>
                     </div>
-                  </div>
+                    <div className="text-xs opacity-60 mt-2">
+                      {match.goals?.filter((g) => g.teamIndex === 0).length ||
+                        0}{" "}
+                      -{" "}
+                      {match.goals?.filter((g) => g.teamIndex === 1).length ||
+                        0}{" "}
+                      goals • {match.status}
+                    </div>
+                  </button>
+                ))}
+              </div>
 
-                  {/* Goals List */}
-                  {selectedLiveMatch.goals &&
-                    selectedLiveMatch.goals.length > 0 && (
-                      <div className="mb-4 p-3 bg-base-100/50 rounded">
-                        <h4 className="font-semibold text-sm mb-2">
-                          ⚽ Goals:
-                        </h4>
-                        <div className="space-y-1 max-h-32 overflow-y-auto">
-                          {selectedLiveMatch.goals.map((goal, idx) => (
-                            <div key={idx} className="text-xs">
-                              <span className="font-mono opacity-70">
-                                {goal.minute}'
-                              </span>
-                              {" - "}
-                              <span className="font-semibold">
-                                {goal.player?.name}
-                              </span>{" "}
-                              <span className="text-primary font-semibold">
-                                (
-                                {goal.teamIndex === 0
-                                  ? selectedLiveMatch.teams[0]?.name
-                                  : selectedLiveMatch.teams[1]?.name}
-                                )
-                              </span>
-                            </div>
-                          ))}
+              {/* Selected Match Details */}
+              {selectedLiveMatch && (
+                <div className="border-t border-white/10 pt-4 space-y-4">
+                  <div className="bg-base-200/50 rounded-lg p-4">
+                    <h3 className="font-bold mb-3">
+                      Match: {selectedLiveMatch.teams[0]?.name} vs{" "}
+                      {selectedLiveMatch.teams[1]?.name}
+                    </h3>
+
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="text-center p-3 bg-base-100/50 rounded">
+                        <div className="text-sm opacity-60">
+                          {selectedLiveMatch.teams[0]?.name}
+                        </div>
+                        <div className="text-4xl font-mono font-bold text-primary">
+                          {selectedLiveMatch.score?.teamA || 0}
                         </div>
                       </div>
-                    )}
+                      <div className="text-center p-3 bg-base-100/50 rounded">
+                        <div className="text-sm opacity-60">
+                          {selectedLiveMatch.teams[1]?.name}
+                        </div>
+                        <div className="text-4xl font-mono font-bold text-secondary">
+                          {selectedLiveMatch.score?.teamB || 0}
+                        </div>
+                      </div>
+                    </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        navigate(`/live-match?matchId=${selectedLiveMatch._id}`)
-                      }
-                      className="btn btn-primary btn-sm flex-1"
-                    >
-                      View & Add Goals
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log(
-                          "End Match button clicked, selected match:",
-                          selectedLiveMatch,
-                        );
-                        if (selectedLiveMatch?._id) {
-                          handleEndMatch(selectedLiveMatch._id);
-                        } else {
-                          notify("No match selected", "error");
+                    {/* Goals List */}
+                    {selectedLiveMatch.goals &&
+                      selectedLiveMatch.goals.length > 0 && (
+                        <div className="mb-4 p-3 bg-base-100/50 rounded">
+                          <h4 className="font-semibold text-sm mb-2">
+                            ⚽ Goals:
+                          </h4>
+                          <div className="space-y-1 max-h-32 overflow-y-auto">
+                            {selectedLiveMatch.goals.map((goal, idx) => (
+                              <div key={idx} className="text-xs">
+                                <span className="font-mono opacity-70">
+                                  {goal.minute}'
+                                </span>
+                                {" - "}
+                                <span className="font-semibold">
+                                  {goal.player?.name}
+                                </span>{" "}
+                                <span className="text-primary font-semibold">
+                                  (
+                                  {goal.teamIndex === 0
+                                    ? selectedLiveMatch.teams[0]?.name
+                                    : selectedLiveMatch.teams[1]?.name}
+                                  )
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate(
+                            `/live-match?matchId=${selectedLiveMatch._id}`,
+                          )
                         }
-                      }}
-                      className="btn btn-error btn-sm"
-                    >
-                      <Square className="w-4" />
-                      End Match
-                    </button>
+                        className="btn btn-primary btn-sm flex-1"
+                      >
+                        View & Add Goals
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (selectedLiveMatch?._id) {
+                            handleEndMatch(selectedLiveMatch._id);
+                          } else {
+                            notify("No match selected", "error");
+                          }
+                        }}
+                        className="btn btn-error btn-sm"
+                      >
+                        <Square className="w-4" />
+                        End Match
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="text-center py-8 opacity-60">
-            <Trophy className="w-12 h-12 mx-auto opacity-30 mb-2" />
-            <p>No live matches. Start one to begin!</p>
-          </div>
-        )}
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8 opacity-60">
+              <Trophy className="w-12 h-12 mx-auto opacity-30 mb-2" />
+              <p>No live matches. Start one to begin!</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -2134,7 +2250,10 @@ export default function AdminPanel() {
                   className="input input-bordered w-full"
                   value={editingPlayer.email}
                   onChange={(e) =>
-                    setEditingPlayer({ ...editingPlayer, email: e.target.value })
+                    setEditingPlayer({
+                      ...editingPlayer,
+                      email: e.target.value,
+                    })
                   }
                 />
               </div>
@@ -2173,7 +2292,7 @@ export default function AdminPanel() {
             >
               <h3 className="font-bold text-lg">
                 🏆 Create Tournament - Step {tournamentStep}/
-                3
+                {newTournament.hasBidding ? 4 : 3}
               </h3>
 
               {/* Step 1: Basic Information */}
@@ -2253,6 +2372,50 @@ export default function AdminPanel() {
                       <option value="live">Live</option>
                     </select>
                   </div>
+
+                  <div className="divider text-sm font-semibold">
+                    Player Bidding
+                  </div>
+                  <label className="label cursor-pointer justify-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="checkbox"
+                      checked={newTournament.hasBidding}
+                      onChange={(e) =>
+                        setNewTournament({
+                          ...newTournament,
+                          hasBidding: e.target.checked,
+                        })
+                      }
+                    />
+                    <span className="label-text font-medium">
+                      Enable player bidding for this tournament
+                    </span>
+                  </label>
+                  {newTournament.hasBidding && (
+                    <div>
+                      <label
+                        htmlFor="new-tournament-budget"
+                        className="text-sm font-semibold block mb-1"
+                      >
+                        Total money per team
+                      </label>
+                      <input
+                        id="new-tournament-budget"
+                        type="number"
+                        min="0"
+                        placeholder="e.g., 1000000"
+                        className="input input-bordered w-full"
+                        value={newTournament.totalMoneyPerTeam}
+                        onChange={(e) =>
+                          setNewTournament({
+                            ...newTournament,
+                            totalMoneyPerTeam: Number(e.target.value) || 0,
+                          })
+                        }
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2504,122 +2667,127 @@ export default function AdminPanel() {
                 </div>
               )}
 
-              {tournamentStep === 3 &&
-                newTournament.type === "knockout" && (
-                  <div className="space-y-3">
-                    <div className="bg-base-200 p-3 rounded space-y-3">
-                      <h4 className="font-bold mb-2">Knockout Setup</h4>
-                      <p className="text-xs opacity-70">
-                        Choose the first knockout round for this tournament.
-                      </p>
-                      <select
-                        className="select select-bordered w-full"
-                        value={newTournament.knockoutRound}
+              {tournamentStep === 3 && newTournament.type === "knockout" && (
+                <div className="space-y-3">
+                  <div className="bg-base-200 p-3 rounded space-y-3">
+                    <h4 className="font-bold mb-2">Knockout Setup</h4>
+                    <p className="text-xs opacity-70">
+                      Choose the first knockout round for this tournament.
+                    </p>
+                    <select
+                      className="select select-bordered w-full"
+                      value={newTournament.knockoutRound}
+                      onChange={(e) =>
+                        setNewTournament({
+                          ...newTournament,
+                          knockoutRound: e.target.value,
+                        })
+                      }
+                    >
+                      <option value="final">Direct Final</option>
+                      <option value="semi">Semi Final + Final</option>
+                      <option value="quarter">
+                        Quarter Final + Semi + Final
+                      </option>
+                    </select>
+                    <label className="label cursor-pointer justify-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="checkbox"
+                        checked={newTournament.includeThirdPlaceMatch}
                         onChange={(e) =>
                           setNewTournament({
                             ...newTournament,
-                            knockoutRound: e.target.value,
+                            includeThirdPlaceMatch: e.target.checked,
                           })
                         }
-                      >
-                        <option value="final">Direct Final</option>
-                        <option value="semi">Semi Final + Final</option>
-                        <option value="quarter">
-                          Quarter Final + Semi + Final
-                        </option>
-                      </select>
-                      <label className="label cursor-pointer justify-start gap-3">
+                      />
+                      <span className="label-text">
+                        Include 3rd place match
+                      </span>
+                    </label>
+
+                    <label className="label cursor-pointer justify-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="checkbox"
+                        checked={newTournament.transferMarketEnabled}
+                        onChange={(e) =>
+                          setNewTournament({
+                            ...newTournament,
+                            transferMarketEnabled: e.target.checked,
+                          })
+                        }
+                      />
+                      <span className="label-text">
+                        Enable transfer market for this tournament
+                      </span>
+                    </label>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-xs opacity-70 block mb-1">
+                          Live players per team
+                        </label>
                         <input
-                          type="checkbox"
-                          className="checkbox"
-                          checked={newTournament.includeThirdPlaceMatch}
+                          type="number"
+                          min="1"
+                          className="input input-bordered w-full"
+                          value={newTournament.livePlayersPerTeam}
                           onChange={(e) =>
                             setNewTournament({
                               ...newTournament,
-                              includeThirdPlaceMatch: e.target.checked,
+                              livePlayersPerTeam: Number(e.target.value) || 7,
                             })
                           }
                         />
-                        <span className="label-text">Include 3rd place match</span>
-                      </label>
-
-                      <label className="label cursor-pointer justify-start gap-3">
+                      </div>
+                      <div>
+                        <label className="text-xs opacity-70 block mb-1">
+                          Sub players per team
+                        </label>
                         <input
-                          type="checkbox"
-                          className="checkbox"
-                          checked={newTournament.transferMarketEnabled}
+                          type="number"
+                          min="0"
+                          className="input input-bordered w-full"
+                          value={newTournament.subPlayersPerTeam}
                           onChange={(e) =>
                             setNewTournament({
                               ...newTournament,
-                              transferMarketEnabled: e.target.checked,
+                              subPlayersPerTeam: Number(e.target.value) || 0,
                             })
                           }
                         />
-                        <span className="label-text">Enable transfer market for this tournament</span>
-                      </label>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div>
-                          <label className="text-xs opacity-70 block mb-1">
-                            Live players per team
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            className="input input-bordered w-full"
-                            value={newTournament.livePlayersPerTeam}
-                            onChange={(e) =>
-                              setNewTournament({
-                                ...newTournament,
-                                livePlayersPerTeam: Number(e.target.value) || 7,
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs opacity-70 block mb-1">
-                            Sub players per team
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            className="input input-bordered w-full"
-                            value={newTournament.subPlayersPerTeam}
-                            onChange={(e) =>
-                              setNewTournament({
-                                ...newTournament,
-                                subPlayersPerTeam: Number(e.target.value) || 0,
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs opacity-70 block mb-1">Swap players</label>
-                          <select
-                            className="select select-bordered w-full"
-                            value={newTournament.allowSwapPlayers ? "yes" : "no"}
-                            onChange={(e) =>
-                              setNewTournament({
-                                ...newTournament,
-                                allowSwapPlayers: e.target.value === "yes",
-                              })
-                            }
-                          >
-                            <option value="yes">Yes</option>
-                            <option value="no">No</option>
-                          </select>
-                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs opacity-70 block mb-1">
+                          Swap players
+                        </label>
+                        <select
+                          className="select select-bordered w-full"
+                          value={newTournament.allowSwapPlayers ? "yes" : "no"}
+                          onChange={(e) =>
+                            setNewTournament({
+                              ...newTournament,
+                              allowSwapPlayers: e.target.value === "yes",
+                            })
+                          }
+                        >
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
                       </div>
                     </div>
-
-                    <div className="bg-base-300/50 p-2 rounded text-xs">
-                      <p className="font-semibold mb-1">Tournament Summary:</p>
-                      <p>📝 Name: {newTournament.name}</p>
-                      <p>🏀 Teams: {tempTeams.length}</p>
-                      <p>🥊 Starts from: {newTournament.knockoutRound}</p>
-                    </div>
                   </div>
-                )}
+
+                  <div className="bg-base-300/50 p-2 rounded text-xs">
+                    <p className="font-semibold mb-1">Tournament Summary:</p>
+                    <p>📝 Name: {newTournament.name}</p>
+                    <p>🏀 Teams: {tempTeams.length}</p>
+                    <p>🥊 Starts from: {newTournament.knockoutRound}</p>
+                  </div>
+                </div>
+              )}
 
               {tournamentStep === 3 &&
                 newTournament.type === "group-knockout" && (
@@ -2722,7 +2890,9 @@ export default function AdminPanel() {
                             })
                           }
                         />
-                        <span className="label-text">Include 3rd place match</span>
+                        <span className="label-text">
+                          Include 3rd place match
+                        </span>
                       </label>
                     </div>
 
@@ -2737,11 +2907,145 @@ export default function AdminPanel() {
                           : `Custom ${newTournament.knockoutRound}`}
                       </p>
                       <p>
-                        ✅ Qualified per group: {newTournament.groupQualifiedCount}
+                        ✅ Qualified per group:{" "}
+                        {newTournament.groupQualifiedCount}
                       </p>
                     </div>
                   </div>
                 )}
+
+              {/* Step 4: Player Bidding Setup */}
+              {tournamentStep === 4 && newTournament.hasBidding && (
+                <div className="space-y-3">
+                  <div className="bg-base-200 p-3 rounded">
+                    <h4 className="font-bold mb-2">
+                      Player Pricing & Team Assignment
+                    </h4>
+                    <p className="text-xs opacity-70 mb-3">
+                      Set a price for each player and assign them to a team.
+                      Budget per team: {newTournament.totalMoneyPerTeam}
+                    </p>
+
+                    <div className="overflow-auto max-h-64 rounded-lg border border-white/10">
+                      <table className="table table-sm w-full">
+                        <thead>
+                          <tr>
+                            <th>Player</th>
+                            <th>Team</th>
+                            <th>Price</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {playerPricesDraft.map((item, idx) => {
+                            const player = players.find(
+                              (p) => String(p._id) === String(item.playerId),
+                            );
+                            return (
+                              <tr key={item.playerId}>
+                                <td>
+                                  {player?.name || "Unknown"}
+                                  <span className="text-xs opacity-60 ml-1">
+                                    ({player?.playerId || ""})
+                                  </span>
+                                </td>
+                                <td>
+                                  <select
+                                    className="select select-bordered select-sm w-full"
+                                    value={item.teamName}
+                                    onChange={(e) => {
+                                      const newTeamName = e.target.value;
+                                      setPlayerPricesDraft((prev) => {
+                                        const next = [...prev];
+                                        next[idx] = {
+                                          ...next[idx],
+                                          teamName: newTeamName,
+                                        };
+                                        return next;
+                                      });
+                                      // Also update tempTeams to reflect team assignment
+                                      setTempTeams((prevTeams) => {
+                                        return prevTeams.map((team) => {
+                                          if (team.name === newTeamName) {
+                                            if (
+                                              !team.players.includes(
+                                                item.playerId,
+                                              )
+                                            ) {
+                                              return {
+                                                ...team,
+                                                players: [
+                                                  ...team.players,
+                                                  item.playerId,
+                                                ],
+                                              };
+                                            }
+                                          } else if (
+                                            team.players.includes(item.playerId)
+                                          ) {
+                                            return {
+                                              ...team,
+                                              players: team.players.filter(
+                                                (p) => p !== item.playerId,
+                                              ),
+                                            };
+                                          }
+                                          return team;
+                                        });
+                                      });
+                                    }}
+                                  >
+                                    {tempTeams.map((team) => (
+                                      <option key={team.name} value={team.name}>
+                                        {team.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    className="input input-bordered input-sm w-full"
+                                    value={item.price}
+                                    onChange={(e) => {
+                                      const newPrice = Math.max(
+                                        0,
+                                        Number(e.target.value) || 0,
+                                      );
+                                      setPlayerPricesDraft((prev) => {
+                                        const next = [...prev];
+                                        next[idx] = {
+                                          ...next[idx],
+                                          price: newPrice,
+                                        };
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="bg-base-300/50 p-2 rounded text-xs">
+                    <p className="font-semibold mb-1">Tournament Summary:</p>
+                    <p>📝 Name: {newTournament.name}</p>
+                    <p>🏀 Teams: {tempTeams.length}</p>
+                    <p>
+                      💰 Bidding enabled: Budget{" "}
+                      {newTournament.totalMoneyPerTeam} per team
+                    </p>
+                    <p>
+                      👤 Players with prices:{" "}
+                      {playerPricesDraft.filter((p) => p.price > 0).length}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Action Buttons */}
               <div className="modal-action gap-2 justify-between">
@@ -2763,6 +3067,7 @@ export default function AdminPanel() {
                       setTournamentStep(1);
                       setTempTeams([]);
                       setNewTeam({ name: "", players: [] });
+                      setPlayerPricesDraft([]);
                     }}
                   >
                     Cancel
@@ -2770,14 +3075,12 @@ export default function AdminPanel() {
                   <button
                     type="submit"
                     className={`btn btn-sm ${
-                      tournamentStep ===
-                      3
+                      tournamentStep === (newTournament.hasBidding ? 4 : 3)
                         ? "btn-primary"
                         : "btn-info"
                     }`}
                   >
-                    {tournamentStep ===
-                    3
+                    {tournamentStep === (newTournament.hasBidding ? 4 : 3)
                       ? "✅ Create Tournament"
                       : "Next →"}
                   </button>
@@ -2792,8 +3095,15 @@ export default function AdminPanel() {
         <>
           <div
             className="fixed inset-0 bg-black/50 z-40"
-            onClick={() => setShowEditTeamsModal(false)}
+            onClick={() => {
+              setShowAddTournamentModal(false);
+              setTournamentStep(1);
+              setTempTeams([]);
+              setNewTeam({ name: "", players: [] });
+              setPlayerPricesDraft([]);
+            }}
           ></div>
+
           <dialog open className="modal modal-open z-50">
             <div className="modal-box max-w-2xl space-y-4">
               <h3 className="font-bold">
@@ -2909,7 +3219,9 @@ export default function AdminPanel() {
           <div className="fixed inset-0 bg-black/50 z-40"></div>
           <dialog open className="modal modal-open z-50">
             <div className="modal-box max-w-md">
-              <h3 className="font-bold text-lg">{confirmBox.title || "Confirm action"}</h3>
+              <h3 className="font-bold text-lg">
+                {confirmBox.title || "Confirm action"}
+              </h3>
               <p className="py-3 text-sm opacity-80">{confirmBox.text}</p>
               <div className="modal-action">
                 <button

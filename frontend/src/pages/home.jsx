@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth.jsx";
 import { apiRequest } from "../lib/api-client.js";
 
@@ -9,7 +10,9 @@ export default function Home() {
   const [finished, setFinished] = useState([]);
   const [tournaments, setTournaments] = useState([]);
   const [pulseMessage, setPulseMessage] = useState("");
-  const [message, setMessage] = useState("Loading latest matches and tournaments...");
+  const [message, setMessage] = useState(
+    "Loading latest matches and tournaments...",
+  );
   const [messageType, setMessageType] = useState("info");
 
   function formatWhen(iso) {
@@ -52,12 +55,12 @@ export default function Home() {
           {m.phase ? ` · ${m.phase}` : ""}
         </div>
         <div className="text-xs opacity-60">{formatWhen(m.scheduledAt)}</div>
-        <a
+        <Link
           className="link link-primary text-sm"
-          href={`/live-match?matchId=${id}`}
+          to={`/live-match?matchId=${id}`}
         >
           Live / details
-        </a>
+        </Link>
       </li>
     );
   }
@@ -77,12 +80,12 @@ export default function Home() {
             {m.score.teamA}–{m.score.teamB}
           </span>
         </div>
-        <a
+        <Link
           className="link link-primary text-sm"
-          href={`/live-match?matchId=${id}`}
+          to={`/live-match?matchId=${id}`}
         >
           View match
-        </a>
+        </Link>
       </li>
     );
   }
@@ -94,16 +97,23 @@ export default function Home() {
       "Today is perfect for discovering a new top scorer.",
       "Quick tip: check tournament details after each result.",
     ];
-    setPulseMessage(
-      pulseOptions[Math.floor(Math.random() * pulseOptions.length)],
-    );
+    const updatePulse = () => {
+      setPulseMessage(
+        pulseOptions[Math.floor(Math.random() * pulseOptions.length)],
+      );
+    };
+    updatePulse();
+    const pulseInterval = setInterval(updatePulse, 10000);
+
+    const controller = new AbortController();
+    const { signal } = controller;
 
     const load = async () => {
       try {
         const [upcomingData, finishedData, toursData] = await Promise.all([
-          apiRequest("/matches/schedule/upcoming"),
-          apiRequest("/matches/schedule/recent-results"),
-          apiRequest("/tournaments"),
+          apiRequest("/matches/schedule/upcoming", { signal }),
+          apiRequest("/matches/schedule/recent-results", { signal }),
+          apiRequest("/tournaments", { signal }),
         ]);
 
         setUpcoming(upcomingData.matches || []);
@@ -112,11 +122,17 @@ export default function Home() {
         setMessage("");
         setMessageType("");
       } catch (err) {
+        if (err.name === "AbortError") return;
         setMessage(err.message);
         setMessageType("error");
       }
     };
     load();
+
+    return () => {
+      clearInterval(pulseInterval);
+      controller.abort();
+    };
   }, []);
 
   const handleDeleteRecentResult = async (matchId) => {
@@ -139,7 +155,7 @@ export default function Home() {
   };
 
   return (
-    <div className="w-full space-y-8">
+    <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8 py-4">
       {/* Header */}
       <div>
         <h1 className="text-4xl font-bold mb-3">⚽ Matches & Tournaments</h1>
@@ -160,11 +176,17 @@ export default function Home() {
             <div className="p-3 rounded-lg bg-base-200/50">
               <p className="font-semibold mb-1">1) Check match status</p>
               <p className="opacity-75">
-                <span className="badge badge-warning badge-xs mr-1">upcoming</span>
+                <span className="badge badge-warning badge-sm px-2 py-1 mr-1">
+                  upcoming
+                </span>
                 Not started,
-                <span className="badge badge-success badge-xs mx-1">live</span>
+                <span className="badge badge-success badge-sm px-2 py-1 mx-1">
+                  live
+                </span>
                 currently running,
-                <span className="badge badge-secondary badge-xs ml-1">finished</span>
+                <span className="badge badge-secondary badge-sm px-2 py-1 ml-1">
+                  finished
+                </span>
                 ended.
               </p>
             </div>
@@ -177,7 +199,8 @@ export default function Home() {
             <div className="p-3 rounded-lg bg-base-200/50">
               <p className="font-semibold mb-1">3) Explore tournaments</p>
               <p className="opacity-75">
-                Use the tournament cards to view standings, fixtures, and results.
+                Use the tournament cards to view standings, fixtures, and
+                results.
               </p>
             </div>
           </div>
@@ -234,12 +257,12 @@ export default function Home() {
                           {formatWhen(m.scheduledAt)}
                         </div>
                       </div>
-                      <a
+                      <Link
                         className="btn btn-sm btn-primary mt-2"
-                        href={`/live-match?matchId=${id}`}
+                        to={`/live-match?matchId=${id}`}
                       >
                         View Live Match →
-                      </a>
+                      </Link>
                     </li>
                   );
                 })}
@@ -279,9 +302,12 @@ export default function Home() {
                           </span>
                         </div>
                       </div>
-                      <a className="btn btn-sm btn-ghost" href={`/match/${id}`}>
+                      <Link
+                        className="btn btn-sm btn-ghost"
+                        to={`/match/${id}`}
+                      >
                         Match Details →
-                      </a>
+                      </Link>
                       {isAdmin && (
                         <button
                           type="button"
@@ -339,12 +365,12 @@ export default function Home() {
                       </span>
                     </div>
                   </div>
-                  <a
+                  <Link
                     className="btn btn-primary btn-sm w-full"
-                    href={`/tournament?tournamentId=${t._id || t.id}`}
+                    to={`/tournament?tournamentId=${t._id || t.id}`}
                   >
                     Tournament Details →
-                  </a>
+                  </Link>
                 </div>
               ))}
             </div>

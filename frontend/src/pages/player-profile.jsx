@@ -58,6 +58,7 @@ export default function PlayerProfile() {
             <p>Position: {player.position || "-"}</p>
             <p>Team: {player.team || "-"}</p>
             <p>Goals: {player.stats?.goals || 0}</p>
+            <p>Assists: {player.stats?.assists || 0}</p>
             <p>Matches: {player.stats?.matches || 0}</p>
             <p>Yellow Cards: {player.stats?.yellowCards || 0}</p>
             <p>Red Cards: {player.stats?.redCards || 0}</p>

@@ -64,7 +64,6 @@ export default function AdminSettings() {
       const data = await fetchWithAuth("/stats/admin/stats");
       setStats(data);
     } catch (error) {
-      console.error("Stats error:", error);
     }
   };
 

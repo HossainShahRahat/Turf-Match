@@ -6,8 +6,10 @@ import { Player } from "../models/Player.js";
 import { Match } from "../models/Match.js";
 import { requireAdminAuth } from "../middleware/auth.js";
 import { uploadTournamentImageBuffer } from "../services/cloudinary.js";
+import { applyFinishedMatchStats } from "./matches.js";
 
 const router = express.Router();
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -501,7 +503,9 @@ function resolveKnockoutPlan(tournament, groups) {
 
     includeThirdPlace =
       totalQualified >= 4 ||
-      (groups.length === 1 && groups[0].teams.length === 4 && totalQualified === 2);
+      (groups.length === 1 &&
+        groups[0].teams.length === 4 &&
+        totalQualified === 2);
   }
 
   return { round, includeThirdPlace, qualifiedCount, totalQualified };
@@ -518,24 +522,64 @@ function buildGroupKnockoutFixtures(groups, tournament) {
   if (round === "quarter") {
     if (hasSingleGroup) {
       fixtures.push(
-        { teamA: "1st Group A", teamB: "8th Group A", phase: "quarter-final-1" },
-        { teamA: "4th Group A", teamB: "5th Group A", phase: "quarter-final-2" },
-        { teamA: "2nd Group A", teamB: "7th Group A", phase: "quarter-final-3" },
-        { teamA: "3rd Group A", teamB: "6th Group A", phase: "quarter-final-4" },
+        {
+          teamA: "1st Group A",
+          teamB: "8th Group A",
+          phase: "quarter-final-1",
+        },
+        {
+          teamA: "4th Group A",
+          teamB: "5th Group A",
+          phase: "quarter-final-2",
+        },
+        {
+          teamA: "2nd Group A",
+          teamB: "7th Group A",
+          phase: "quarter-final-3",
+        },
+        {
+          teamA: "3rd Group A",
+          teamB: "6th Group A",
+          phase: "quarter-final-4",
+        },
       );
     } else {
       const first = groups[0]?.name || "Group A";
       const second = groups[1]?.name || "Group B";
       fixtures.push(
-        { teamA: `1st ${first}`, teamB: `4th ${second}`, phase: "quarter-final-1" },
-        { teamA: `2nd ${first}`, teamB: `3rd ${second}`, phase: "quarter-final-2" },
-        { teamA: `1st ${second}`, teamB: `4th ${first}`, phase: "quarter-final-3" },
-        { teamA: `2nd ${second}`, teamB: `3rd ${first}`, phase: "quarter-final-4" },
+        {
+          teamA: `1st ${first}`,
+          teamB: `4th ${second}`,
+          phase: "quarter-final-1",
+        },
+        {
+          teamA: `2nd ${first}`,
+          teamB: `3rd ${second}`,
+          phase: "quarter-final-2",
+        },
+        {
+          teamA: `1st ${second}`,
+          teamB: `4th ${first}`,
+          phase: "quarter-final-3",
+        },
+        {
+          teamA: `2nd ${second}`,
+          teamB: `3rd ${first}`,
+          phase: "quarter-final-4",
+        },
       );
     }
     fixtures.push(
-      { teamA: "Winner Quarter 1", teamB: "Winner Quarter 2", phase: "semi-final-1" },
-      { teamA: "Winner Quarter 3", teamB: "Winner Quarter 4", phase: "semi-final-2" },
+      {
+        teamA: "Winner Quarter 1",
+        teamB: "Winner Quarter 2",
+        phase: "semi-final-1",
+      },
+      {
+        teamA: "Winner Quarter 3",
+        teamB: "Winner Quarter 4",
+        phase: "semi-final-2",
+      },
       { teamA: "Winner Semi 1", teamB: "Winner Semi 2", phase: "final" },
     );
     if (includeThirdPlace) {
@@ -558,8 +602,16 @@ function buildGroupKnockoutFixtures(groups, tournament) {
       const first = groups[0]?.name || "Group A";
       const second = groups[1]?.name || "Group B";
       fixtures.push(
-        { teamA: `1st ${first}`, teamB: `2nd ${second}`, phase: "semi-final-1" },
-        { teamA: `1st ${second}`, teamB: `2nd ${first}`, phase: "semi-final-2" },
+        {
+          teamA: `1st ${first}`,
+          teamB: `2nd ${second}`,
+          phase: "semi-final-1",
+        },
+        {
+          teamA: `1st ${second}`,
+          teamB: `2nd ${first}`,
+          phase: "semi-final-2",
+        },
       );
     }
     fixtures.push({
@@ -717,14 +769,12 @@ router.post("/", requireAdminAuth, upload.single("image"), async (req, res) => {
         groupQualifiedCount: Number.isFinite(Number(groupQualifiedCount))
           ? Number(groupQualifiedCount)
           : 2,
-        knockoutStageMode:
-          knockoutStageMode === "custom" ? "custom" : "auto",
+        knockoutStageMode: knockoutStageMode === "custom" ? "custom" : "auto",
         knockoutRound: ["final", "semi", "quarter"].includes(knockoutRound)
           ? knockoutRound
           : "semi",
         includeThirdPlaceMatch:
-          includeThirdPlaceMatch === true ||
-          includeThirdPlaceMatch === "true",
+          includeThirdPlaceMatch === true || includeThirdPlaceMatch === "true",
         groups,
       },
       transferMarketEnabled: parseBoolean(transferMarketEnabled, false),
@@ -1087,7 +1137,11 @@ router.post(
       if (tournament.type === "league") {
         if (generationMode === "sequential") {
           const pairs = buildSequentialPairs(teams);
-          for (let matchNumber = 0; matchNumber < pairs.length; matchNumber += 1) {
+          for (
+            let matchNumber = 0;
+            matchNumber < pairs.length;
+            matchNumber += 1
+          ) {
             const pair = pairs[matchNumber];
             await createMatchDoc(
               pair[0],
@@ -1099,7 +1153,11 @@ router.post(
           const rounds = buildRoundRobinPairs(teams);
           for (let round = 0; round < rounds.length; round += 1)
             for (const pair of rounds[round])
-              await createMatchDoc(pair[0], pair[1], `league-round-${round + 1}`);
+              await createMatchDoc(
+                pair[0],
+                pair[1],
+                `league-round-${round + 1}`,
+              );
         }
       } else if (tournament.type === "knockout") {
         const pairs = buildKnockoutPairs(teams);
@@ -1136,13 +1194,11 @@ router.post(
       }
       tournament.matches = created;
       await tournament.save();
-      return res
-        .status(201)
-        .json({
-          message: "Fixtures generated",
-          matchCount: created.length,
-          matchIds: created,
-        });
+      return res.status(201).json({
+        message: "Fixtures generated",
+        matchCount: created.length,
+        matchIds: created,
+      });
     } catch (error) {
       if (created.length) {
         await Match.deleteMany({ _id: { $in: created } }).catch(() => {});
@@ -1188,12 +1244,10 @@ router.patch(
       );
       tournament.matches = ids;
       await tournament.save();
-      return res
-        .status(200)
-        .json({
-          message: "Matches assigned to tournament",
-          matchCount: ids.length,
-        });
+      return res.status(200).json({
+        message: "Matches assigned to tournament",
+        matchCount: ids.length,
+      });
     } catch (error) {
       logTournamentRouteError("PATCH /:tournamentId/matches/assign", error, {
         tournamentId: req.params.tournamentId,
@@ -1251,19 +1305,17 @@ router.patch(
           : 0;
       await tournament.save();
       await player.save();
-      return res
-        .status(200)
-        .json({
-          message: "Player price updated for tournament",
-          player: {
-            id: player._id,
-            playerId: player.playerId,
-            name: player.name,
-            tournamentsPlayed: player.stats.tournamentsPlayed,
-            totalValue: player.stats.totalValue,
-            value: player.stats.value,
-          },
-        });
+      return res.status(200).json({
+        message: "Player price updated for tournament",
+        player: {
+          id: player._id,
+          playerId: player.playerId,
+          name: player.name,
+          tournamentsPlayed: player.stats.tournamentsPlayed,
+          totalValue: player.stats.totalValue,
+          value: player.stats.value,
+        },
+      });
     } catch (error) {
       logTournamentRouteError("PATCH /:tournamentId/player-prices", error, {
         tournamentId: req.params.tournamentId,
@@ -1284,7 +1336,9 @@ router.delete(
         !mongoose.isValidObjectId(tournamentId) ||
         !mongoose.isValidObjectId(fixtureId)
       ) {
-        return res.status(400).json({ message: "Invalid tournament or fixture ID" });
+        return res
+          .status(400)
+          .json({ message: "Invalid tournament or fixture ID" });
       }
       const tournament = await Tournament.findById(tournamentId);
       if (!tournament)
@@ -1303,11 +1357,17 @@ router.delete(
         (id) => id.toString() !== fixtureId,
       );
       await tournament.save();
-      return res.status(200).json({ message: "Tournament history item deleted" });
+      return res
+        .status(200)
+        .json({ message: "Tournament history item deleted" });
     } catch (error) {
-      logTournamentRouteError("DELETE /:tournamentId/fixtures/:fixtureId", error, {
-        params: req.params,
-      });
+      logTournamentRouteError(
+        "DELETE /:tournamentId/fixtures/:fixtureId",
+        error,
+        {
+          params: req.params,
+        },
+      );
       return res.status(500).json({ message: error.message });
     }
   },
@@ -1320,24 +1380,42 @@ router.post(
     try {
       const { tournamentId } = req.params;
       const { playerId, fromTeamName, toTeamName } = req.body;
-      if (!mongoose.isValidObjectId(tournamentId) || !mongoose.isValidObjectId(playerId)) {
-        return res.status(400).json({ message: "Invalid tournament or player ID" });
+      if (
+        !mongoose.isValidObjectId(tournamentId) ||
+        !mongoose.isValidObjectId(playerId)
+      ) {
+        return res
+          .status(400)
+          .json({ message: "Invalid tournament or player ID" });
       }
-      const fromNameNorm = String(fromTeamName || "").trim().toLowerCase();
-      const toNameNorm = String(toTeamName || "").trim().toLowerCase();
+      const fromNameNorm = String(fromTeamName || "")
+        .trim()
+        .toLowerCase();
+      const toNameNorm = String(toTeamName || "")
+        .trim()
+        .toLowerCase();
       if (!fromNameNorm || !toNameNorm) {
-        return res.status(400).json({ message: "Both source and destination team names are required" });
+        return res
+          .status(400)
+          .json({
+            message: "Both source and destination team names are required",
+          });
       }
       if (fromNameNorm === toNameNorm) {
-        return res.status(400).json({ message: "Source and destination teams must be different" });
+        return res
+          .status(400)
+          .json({ message: "Source and destination teams must be different" });
       }
 
       const tournament = await Tournament.findById(tournamentId);
-      if (!tournament) return res.status(404).json({ message: "Tournament not found" });
+      if (!tournament)
+        return res.status(404).json({ message: "Tournament not found" });
       if (tournament.type !== "league") {
         return res
           .status(400)
-          .json({ message: "Player transfer is only available for league tournaments" });
+          .json({
+            message: "Player transfer is only available for league tournaments",
+          });
       }
 
       const teamEntryName = (entry) =>
@@ -1353,7 +1431,11 @@ router.post(
       const fromIdx = findTeamIndex(fromNameNorm);
       const toIdx = findTeamIndex(toNameNorm);
       if (fromIdx === -1 || toIdx === -1) {
-        return res.status(400).json({ message: "Could not find one or both teams on this tournament" });
+        return res
+          .status(400)
+          .json({
+            message: "Could not find one or both teams on this tournament",
+          });
       }
 
       const ensureTeamObject = (idx) => {
@@ -1374,20 +1456,32 @@ router.post(
       const fromTeam = ensureTeamObject(fromIdx);
       const toTeam = ensureTeamObject(toIdx);
       if (!fromTeam?.name || !toTeam?.name) {
-        return res.status(400).json({ message: "Invalid team data on this tournament" });
+        return res
+          .status(400)
+          .json({ message: "Invalid team data on this tournament" });
       }
 
       const pid = playerId.toString();
-      const onFrom = (fromTeam.players || []).some((id) => id.toString() === pid);
+      const onFrom = (fromTeam.players || []).some(
+        (id) => id.toString() === pid,
+      );
       if (!onFrom) {
-        return res.status(400).json({ message: "Player is not listed on the source team" });
+        return res
+          .status(400)
+          .json({ message: "Player is not listed on the source team" });
       }
 
-      fromTeam.players = (fromTeam.players || []).filter((id) => id.toString() !== pid);
+      fromTeam.players = (fromTeam.players || []).filter(
+        (id) => id.toString() !== pid,
+      );
       if (!(toTeam.players || []).some((id) => id.toString() === pid)) {
-        toTeam.players = [...(toTeam.players || []), new mongoose.Types.ObjectId(pid)];
+        toTeam.players = [
+          ...(toTeam.players || []),
+          new mongoose.Types.ObjectId(pid),
+        ];
       }
-      if (fromTeam.captain && fromTeam.captain.toString() === pid) fromTeam.captain = null;
+      if (fromTeam.captain && fromTeam.captain.toString() === pid)
+        fromTeam.captain = null;
       tournament.markModified("teams");
       await tournament.save();
 
@@ -1415,7 +1509,12 @@ router.post(
                               $filter: {
                                 input: "$$team.players",
                                 as: "p",
-                                cond: { $ne: ["$$p", new mongoose.Types.ObjectId(pid)] },
+                                cond: {
+                                  $ne: [
+                                    "$$p",
+                                    new mongoose.Types.ObjectId(pid),
+                                  ],
+                                },
                               },
                             },
                           },
@@ -1449,7 +1548,9 @@ router.post(
         ],
       );
 
-      return res.status(200).json({ message: "Player transferred between teams" });
+      return res
+        .status(200)
+        .json({ message: "Player transferred between teams" });
     } catch (error) {
       logTournamentRouteError("POST /:tournamentId/transfer-player", error, {
         params: req.params,
@@ -1467,12 +1568,15 @@ router.delete("/:tournamentId", requireAdminAuth, async (req, res) => {
       return res.status(400).json({ message: "Invalid tournament ID" });
     }
     const tournament = await Tournament.findById(tournamentId);
-    if (!tournament) return res.status(404).json({ message: "Tournament not found" });
+    if (!tournament)
+      return res.status(404).json({ message: "Tournament not found" });
     await Match.deleteMany({ tournament: tournament._id });
     await Tournament.deleteOne({ _id: tournament._id });
     return res.status(200).json({ message: "Tournament deleted" });
   } catch (error) {
-    logTournamentRouteError("DELETE /:tournamentId", error, { params: req.params });
+    logTournamentRouteError("DELETE /:tournamentId", error, {
+      params: req.params,
+    });
     return res.status(500).json({ message: error.message });
   }
 });

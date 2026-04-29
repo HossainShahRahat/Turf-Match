@@ -70,17 +70,12 @@ app.use("/stats", statsRoutes);
 async function startServer() {
   await mongoose.connect(process.env.MONGODB_URI);
   if (!cloudinaryConfigured()) {
-    console.warn(
-      "Cloudinary is not configured; tournament image uploads will fail until CLOUDINARY_* env vars are set.",
-    );
   }
 
   server.listen(port, () => {
-    console.log(`Backend running on http://localhost:${port}`);
   });
 }
 
 startServer().catch((error) => {
-  console.error("Server startup failed:", error);
   process.exit(1);
 });

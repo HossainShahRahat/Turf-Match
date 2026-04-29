@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "clean": "rm -rf .vite frontend/node_modules/.vite backend/node_modules/.vite",
+    "dev:frontend": "cd frontend && npm run dev",
     "build": "cd backend && npm install && cd .. && node build.js",
     "build:frontend": "cd frontend && npm install && npm run build",
     "build:backend": "cd backend && npm install && node build.js"

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth.jsx";
 import { RefreshCw, LogOut, Menu, LogIn, Bell } from "lucide-react";
@@ -14,6 +15,9 @@ const MainLayout = ({ children }) => {
   const { user, logout, getToken } = useAuth();
   const navigate = useNavigate();
   const isAdmin = !!user;
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
+
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mongoUp, setMongoUp] = useState(false);
   const [socketUp, setSocketUp] = useState(false);
@@ -38,7 +42,8 @@ const MainLayout = ({ children }) => {
       })
       .catch(() => setMongoUp(false));
 
-    const token = getToken();
+    const token = getTokenRef.current();
+
     const socket = io(socketBaseUrl(), {
       autoConnect: false,
       reconnection: false,
@@ -62,7 +67,7 @@ const MainLayout = ({ children }) => {
       mounted = false;
       socket.close();
     };
-  }, [getToken]);
+  }, []);
 
   useEffect(() => {
     const { TOAST_EVENT, NOTIFICATION_EVENT } = uiEvents();

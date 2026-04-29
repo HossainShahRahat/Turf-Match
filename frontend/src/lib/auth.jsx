@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
+
 
 const AuthContext = createContext();
 
@@ -12,9 +13,10 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const getToken = () => localStorage.getItem("adminToken");
+  const getToken = useCallback(() => localStorage.getItem("adminToken"), []);
 
-  const checkAuth = () => {
+  const checkAuth = useCallback(() => {
+
     const token = getToken();
     if (token) {
       try {
@@ -33,17 +35,19 @@ export function AuthProvider({ children }) {
     } else {
       setUser(null);
     }
-  };
+  }, [getToken]);
 
   useEffect(() => {
     checkAuth();
     setLoading(false);
-  }, []);
+  }, [checkAuth]);
 
-  const logout = () => {
+  const logout = useCallback(() => {
+
     localStorage.removeItem("adminToken");
     setUser(null);
-  };
+  }, []);
+
 
   return (
     <AuthContext.Provider

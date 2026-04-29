@@ -285,7 +285,7 @@ export default function Tournament() {
       setFixtures(fixtures || []);
       setTopScorers(topScorers || []);
     } catch (error) {
-      console.error("Tournament details error:", error);
+
       setMessage(`Could not load tournament details: ${error.message}`);
       setMessageType("error");
     }

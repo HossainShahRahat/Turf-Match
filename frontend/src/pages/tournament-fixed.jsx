@@ -200,7 +200,6 @@ export default function Tournament() {
       setProgression(progression);
       setFixtures(fixtures || []);
     } catch (error) {
-      console.error("Tournament details error:", error);
       setMessage(error.message);
       setMessageType("error");
     }

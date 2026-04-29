@@ -42,9 +42,8 @@ router.post("/admin-login", async (req, res) => {
       const syncResult = await import("../services/adminSync.js").then(
         (module) => module.syncAdminFromEnv(),
       );
-      console.log(`Admin sync: ${syncResult.action}`);
     } catch (syncError) {
-      console.warn("Admin sync failed (non-blocking):", syncError.message);
+      // Admin sync failed silently (non-blocking)
     }
 
     return res.status(200).json({ token });
@@ -66,7 +65,6 @@ router.put("/sync-env", async (req, res) => {
     const result = await syncAdminFromEnv();
     return res.status(200).json({ message: "synced", action: result.action });
   } catch (err) {
-    console.error("sync-env error:", err);
     return res.status(500).json({ message: err.message });
   }
 });

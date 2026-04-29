@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Users, LogIn } from "lucide-react";
+import { Users, LogIn, X } from "lucide-react";
 import { useAuth } from "../lib/auth.jsx";
 import { apiRequest } from "../lib/api-client.js";
 
@@ -8,6 +8,7 @@ export default function Players() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [playerDetails, setPlayerDetails] = useState(null);
+  const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState({
     _id: "",
@@ -20,7 +21,9 @@ export default function Players() {
   const { user } = useAuth();
 
   const filteredPlayers = players.filter((player) =>
-    (player?.name || "").toLowerCase().includes(searchTerm.trim().toLowerCase()),
+    (player?.name || "")
+      .toLowerCase()
+      .includes(searchTerm.trim().toLowerCase()),
   );
 
   // Load all players on mount
@@ -70,7 +73,14 @@ export default function Players() {
   const handlePlayerSelect = (player) => {
     setSelectedPlayer(player);
     setPlayerDetails(null);
+    setShowPlayerModal(true);
     loadPlayerDetails(player.playerId);
+  };
+
+  const closePlayerModal = () => {
+    setShowPlayerModal(false);
+    setSelectedPlayer(null);
+    setPlayerDetails(null);
   };
 
   const openEditPlayer = (player) => {
@@ -163,15 +173,21 @@ export default function Players() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
             <div className="p-3 rounded-lg bg-base-200/50">
               <p className="font-semibold mb-1">Search players</p>
-              <p className="opacity-75">Use the search box to quickly find a player by name.</p>
+              <p className="opacity-75">
+                Use the search box to quickly find a player by name.
+              </p>
             </div>
             <div className="p-3 rounded-lg bg-base-200/50">
               <p className="font-semibold mb-1">Select a player</p>
-              <p className="opacity-75">Click any player card to open that player&apos;s profile section.</p>
+              <p className="opacity-75">
+                Click any player card to open that player&apos;s profile modal.
+              </p>
             </div>
             <div className="p-3 rounded-lg bg-base-200/50">
               <p className="font-semibold mb-1">Login note</p>
-              <p className="opacity-75">Full private profile data is visible after player login.</p>
+              <p className="opacity-75">
+                Full private profile data is visible after player login.
+              </p>
             </div>
           </div>
         </div>
@@ -262,127 +278,165 @@ export default function Players() {
               ))}
             </div>
           </div>
-
-          {/* Player details section */}
-          {selectedPlayer && playerDetails && (
-            <div className="border-t border-white/10 pt-8 space-y-6">
-              <h2 className="text-3xl font-bold">Player Profile</h2>
-
-              {/* Hero card */}
-              <div className="card bg-gradient-to-br from-info/10 to-success/10 border border-white/10 shadow-sm">
-                <div className="card-body">
-                  <div className="flex flex-col lg:flex-row justify-between items-start gap-6">
-                    <div className="flex-1">
-                      <h1 className="text-4xl font-bold mb-3">
-                        {playerDetails.name}
-                      </h1>
-                      {user && (
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline mb-3"
-                          onClick={() =>
-                            openEditPlayer({
-                              _id: selectedPlayer?._id,
-                              name: playerDetails.name,
-                              email: playerDetails.email,
-                            })
-                          }
-                        >
-                          Edit Player
-                        </button>
-                      )}
-                      <div className="space-y-2 text-lg opacity-80">
-                        {user && (
-                          <p>
-                            <span className="font-semibold">Player ID:</span>
-                            <span className="font-mono ml-2">
-                              {playerDetails.playerId}
-                            </span>
-                          </p>
-                        )}
-                        {playerDetails.email && (
-                          <p>
-                            <span className="font-semibold">Email:</span>
-                            <span className="ml-2">{playerDetails.email}</span>
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Stats cards */}
-              {playerDetails.stats && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
-                    <div className="card-body text-center p-4">
-                      <h3 className="text-sm opacity-70 font-semibold mb-2">
-                        Matches Played
-                      </h3>
-                      <p className="text-3xl font-mono font-bold text-success">
-                        {playerDetails.stats.matches || 0}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
-                    <div className="card-body text-center p-4">
-                      <h3 className="text-sm opacity-70 font-semibold mb-2">
-                        Goals
-                      </h3>
-                      <p className="text-3xl font-mono font-bold text-primary">
-                        {playerDetails.stats.goals || 0}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
-                    <div className="card-body text-center p-4">
-                      <h3 className="text-sm opacity-70 font-semibold mb-2">
-                        Assists
-                      </h3>
-                      <p className="text-3xl font-mono font-bold text-warning">
-                        {playerDetails.stats.assists || 0}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
-                    <div className="card-body text-center p-4">
-                      <h3 className="text-sm opacity-70 font-semibold mb-2">
-                        Market Value
-                      </h3>
-                      <p className="text-3xl font-mono font-bold text-secondary">
-                        ৳{playerDetails.stats.value || 0}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {selectedPlayer && !playerDetails && !loading && (
-            <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
-              <div className="card-body text-center py-12">
-                <LogIn className="w-12 h-12 mx-auto opacity-50 mb-4" />
-                <p className="text-lg opacity-70 mb-4">
-                  Player login is required to view full details
-                </p>
-                <p className="text-sm opacity-60">
-                  Use Player Login with your Player ID to access complete stats
-                </p>
-              </div>
-            </div>
-          )}
         </div>
       ) : (
         <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
           <div className="card-body text-center py-12">
             <Users className="w-12 h-12 mx-auto opacity-50 mb-4" />
             <p className="text-lg opacity-60">
-              {players.length ? "No players match your search" : "No players registered yet"}
+              {players.length
+                ? "No players match your search"
+                : "No players registered yet"}
             </p>
           </div>
         </div>
+      )}
+
+      {/* Player Details Modal */}
+      {showPlayerModal && selectedPlayer && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={closePlayerModal}
+          ></div>
+          <dialog open className="modal modal-open z-50">
+            <div className="modal-box max-w-3xl max-h-[90vh] overflow-y-auto space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-2xl">Player Profile</h3>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-circle btn-ghost"
+                  onClick={closePlayerModal}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {!playerDetails && !loading && (
+                <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+                  <div className="card-body text-center py-12">
+                    <LogIn className="w-12 h-12 mx-auto opacity-50 mb-4" />
+                    <p className="text-lg opacity-70 mb-4">
+                      Player login is required to view full details
+                    </p>
+                    <p className="text-sm opacity-60">
+                      Use Player Login with your Player ID to access complete
+                      stats
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {playerDetails && (
+                <>
+                  {/* Hero card */}
+                  <div className="card bg-gradient-to-br from-info/10 to-success/10 border border-white/10 shadow-sm">
+                    <div className="card-body">
+                      <div className="flex flex-col lg:flex-row justify-between items-start gap-6">
+                        <div className="flex-1">
+                          <h1 className="text-4xl font-bold mb-3">
+                            {playerDetails.name}
+                          </h1>
+                          {user && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline mb-3"
+                              onClick={() =>
+                                openEditPlayer({
+                                  _id: selectedPlayer?._id,
+                                  name: playerDetails.name,
+                                  email: playerDetails.email,
+                                })
+                              }
+                            >
+                              Edit Player
+                            </button>
+                          )}
+                          <div className="space-y-2 text-lg opacity-80">
+                            {user && (
+                              <p>
+                                <span className="font-semibold">
+                                  Player ID:
+                                </span>
+                                <span className="font-mono ml-2">
+                                  {playerDetails.playerId}
+                                </span>
+                              </p>
+                            )}
+                            {playerDetails.email && (
+                              <p>
+                                <span className="font-semibold">Email:</span>
+                                <span className="ml-2">
+                                  {playerDetails.email}
+                                </span>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stats cards */}
+                  {playerDetails.stats && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+                        <div className="card-body text-center p-4">
+                          <h3 className="text-sm opacity-70 font-semibold mb-2">
+                            Matches
+                          </h3>
+                          <p className="text-3xl font-mono font-bold text-success">
+                            {playerDetails.stats.matches || 0}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+                        <div className="card-body text-center p-4">
+                          <h3 className="text-sm opacity-70 font-semibold mb-2">
+                            Goals
+                          </h3>
+                          <p className="text-3xl font-mono font-bold text-primary">
+                            {playerDetails.stats.goals || 0}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+                        <div className="card-body text-center p-4">
+                          <h3 className="text-sm opacity-70 font-semibold mb-2">
+                            Assists
+                          </h3>
+                          <p className="text-3xl font-mono font-bold text-warning">
+                            {playerDetails.stats.assists || 0}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+                        <div className="card-body text-center p-4">
+                          <h3 className="text-sm opacity-70 font-semibold mb-2">
+                            Yellow Cards
+                          </h3>
+                          <p className="text-3xl font-mono font-bold text-warning">
+                            {playerDetails.stats.yellowCards || 0}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="card bg-base-100/50 backdrop-blur-md border border-white/10 shadow-sm">
+                        <div className="card-body text-center p-4">
+                          <h3 className="text-sm opacity-70 font-semibold mb-2">
+                            Red Cards
+                          </h3>
+                          <p className="text-3xl font-mono font-bold text-error">
+                            {playerDetails.stats.redCards || 0}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </dialog>
+        </>
       )}
 
       {showEditModal && (
@@ -392,10 +446,16 @@ export default function Players() {
             onClick={() => setShowEditModal(false)}
           ></div>
           <dialog open className="modal modal-open z-50">
-            <form className="modal-box max-w-md space-y-4" onSubmit={handleAdminEditPlayer}>
+            <form
+              className="modal-box max-w-md space-y-4"
+              onSubmit={handleAdminEditPlayer}
+            >
               <h3 className="font-bold text-lg">Edit Player</h3>
               <div className="space-y-2">
-                <label htmlFor="edit-player-name" className="text-sm font-medium">
+                <label
+                  htmlFor="edit-player-name"
+                  className="text-sm font-medium"
+                >
                   Name
                 </label>
                 <input
@@ -412,7 +472,10 @@ export default function Players() {
                 />
               </div>
               <div className="space-y-2">
-                <label htmlFor="edit-player-email" className="text-sm font-medium">
+                <label
+                  htmlFor="edit-player-email"
+                  className="text-sm font-medium"
+                >
                   Email
                 </label>
                 <input
@@ -424,7 +487,10 @@ export default function Players() {
                   placeholder="Email"
                   value={editingPlayer.email}
                   onChange={(e) =>
-                    setEditingPlayer({ ...editingPlayer, email: e.target.value })
+                    setEditingPlayer({
+                      ...editingPlayer,
+                      email: e.target.value,
+                    })
                   }
                 />
               </div>

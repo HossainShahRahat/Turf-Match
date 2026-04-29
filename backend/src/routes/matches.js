@@ -21,17 +21,55 @@ const posterUpload = multer({
 const oid = (ids = []) => ids.map((id) => new mongoose.Types.ObjectId(id));
 const uniq = (items) => [...new Set(items.map((item) => item.toString()))];
 
-async function applyFinishedMatchStats(match) {
+export async function applyFinishedMatchStats(match) {
   if (match.statsProcessed) return;
-  const allPlayerIds = uniq([...(match.teams[0].players || []), ...(match.teams[1].players || [])]);
-  if (allPlayerIds.length) await Player.updateMany({ _id: { $in: allPlayerIds } }, { $inc: { "stats.matches": 1 } });
+  const allPlayerIds = uniq([
+    ...(match.teams[0].players || []),
+    ...(match.teams[1].players || []),
+  ]);
+  if (allPlayerIds.length)
+    await Player.updateMany(
+      { _id: { $in: allPlayerIds } },
+      { $inc: { "stats.matches": 1 } },
+    );
 
   const goalsPerPlayer = {};
+  const assistsPerPlayer = {};
   for (const goal of match.goals || []) {
     const pid = goal.player.toString();
     goalsPerPlayer[pid] = (goalsPerPlayer[pid] || 0) + 1;
+    if (goal.assist) {
+      const aid = goal.assist.toString();
+      assistsPerPlayer[aid] = (assistsPerPlayer[aid] || 0) + 1;
+    }
   }
-  await Promise.all(Object.entries(goalsPerPlayer).map(([playerId, c]) => Player.updateOne({ _id: playerId }, { $inc: { "stats.goals": c } })));
+  await Promise.all([
+    ...Object.entries(goalsPerPlayer).map(([playerId, c]) =>
+      Player.updateOne({ _id: playerId }, { $inc: { "stats.goals": c } }),
+    ),
+    ...Object.entries(assistsPerPlayer).map(([playerId, c]) =>
+      Player.updateOne({ _id: playerId }, { $inc: { "stats.assists": c } }),
+    ),
+  ]);
+
+  const yellowCardsPerPlayer = {};
+  const redCardsPerPlayer = {};
+  for (const card of match.cards || []) {
+    const pid = card.player.toString();
+    if (card.type === "yellow") {
+      yellowCardsPerPlayer[pid] = (yellowCardsPerPlayer[pid] || 0) + 1;
+    } else if (card.type === "red") {
+      redCardsPerPlayer[pid] = (redCardsPerPlayer[pid] || 0) + 1;
+    }
+  }
+  await Promise.all([
+    ...Object.entries(yellowCardsPerPlayer).map(([playerId, c]) =>
+      Player.updateOne({ _id: playerId }, { $inc: { "stats.yellowCards": c } }),
+    ),
+    ...Object.entries(redCardsPerPlayer).map(([playerId, c]) =>
+      Player.updateOne({ _id: playerId }, { $inc: { "stats.redCards": c } }),
+    ),
+  ]);
 
   if ((match.ratings || []).length > 0) {
     const roll = {};
@@ -41,14 +79,34 @@ async function applyFinishedMatchStats(match) {
       roll[key].total += r.score;
       roll[key].count += 1;
     }
-    await Promise.all(Object.entries(roll).map(([playerId, v]) => Player.updateOne({ _id: playerId }, { $inc: { "stats.ratingTotal": v.total, "stats.ratingCount": v.count } })));
+    await Promise.all(
+      Object.entries(roll).map(([playerId, v]) =>
+        Player.updateOne(
+          { _id: playerId },
+          {
+            $inc: {
+              "stats.ratingTotal": v.total,
+              "stats.ratingCount": v.count,
+            },
+          },
+        ),
+      ),
+    );
   }
 
   const players = await Player.find({ _id: { $in: allPlayerIds } });
-  await Promise.all(players.map((p) => {
-    const rating = p.stats.ratingCount > 0 ? Number((p.stats.ratingTotal / p.stats.ratingCount).toFixed(2)) : 0;
-    return Player.updateOne({ _id: p._id }, { $set: { "stats.rating": rating } });
-  }));
+  await Promise.all(
+    players.map((p) => {
+      const rating =
+        p.stats.ratingCount > 0
+          ? Number((p.stats.ratingTotal / p.stats.ratingCount).toFixed(2))
+          : 0;
+      return Player.updateOne(
+        { _id: p._id },
+        { $set: { "stats.rating": rating } },
+      );
+    }),
+  );
   match.statsProcessed = true;
   await match.save();
 }
@@ -70,7 +128,9 @@ function getStoredMatchScore(match) {
   }
 
   const teamASet = new Set(
-    (match.teams[0].players || []).map((p) => p._id?.toString?.() || p.toString()),
+    (match.teams[0].players || []).map(
+      (p) => p._id?.toString?.() || p.toString(),
+    ),
   );
   let teamA = 0;
   let teamB = 0;
@@ -88,7 +148,11 @@ function getStoredMatchScore(match) {
 }
 
 function mapMatchResponse(match) {
-  const teamASet = new Set((match.teams[0].players || []).map((p) => p._id?.toString?.() || p.toString()));
+  const teamASet = new Set(
+    (match.teams[0].players || []).map(
+      (p) => p._id?.toString?.() || p.toString(),
+    ),
+  );
   const resolvedScore = getStoredMatchScore(match);
   const goals = (match.goals || []).map((goal) => {
     let teamIndex;
@@ -97,8 +161,14 @@ function mapMatchResponse(match) {
       const pid = goal.player?._id?.toString() || goal.player?.toString();
       teamIndex = pid && teamASet.has(pid) ? 0 : 1;
     }
-    return { player: goal.player, minute: goal.minute, teamIndex };
+    return {
+      player: goal.player,
+      assist: goal.assist || null,
+      minute: goal.minute,
+      teamIndex,
+    };
   });
+
   const cards = (match.cards || []).map((card) => {
     let teamIndex;
     if (Number.isInteger(card.teamIndex)) teamIndex = card.teamIndex;
@@ -110,7 +180,7 @@ function mapMatchResponse(match) {
       player: card.player,
       minute: card.minute,
       teamIndex,
-      type: card.type
+      type: card.type,
     };
   });
   return {
@@ -121,7 +191,12 @@ function mapMatchResponse(match) {
     cards,
     score: resolvedScore,
     scheduledAt: match.scheduledAt || null,
-    phase: match.phase || "regular"
+    phase: match.phase || "regular",
+    matchDuration: match.matchDuration || 90,
+    timerRunning: match.timerRunning || false,
+    timerStartedAt: match.timerStartedAt || null,
+    timerPausedAt: match.timerPausedAt || null,
+    timerOffset: match.timerOffset || 0,
   };
 }
 
@@ -133,8 +208,11 @@ router.get("/schedule/upcoming", async (_req, res) => {
       .populate("teams.players", "name playerId")
       .populate("teams.captain", "name playerId")
       .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
       .populate("cards.player", "name playerId");
-    return res.status(200).json({ matches: matches.map((m) => mapMatchResponse(m)) });
+    return res
+      .status(200)
+      .json({ matches: matches.map((m) => mapMatchResponse(m)) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -148,8 +226,11 @@ router.get("/schedule/recent-results", async (_req, res) => {
       .populate("teams.players", "name playerId")
       .populate("teams.captain", "name playerId")
       .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
       .populate("cards.player", "name playerId");
-    return res.status(200).json({ matches: matches.map((m) => mapMatchResponse(m)) });
+    return res
+      .status(200)
+      .json({ matches: matches.map((m) => mapMatchResponse(m)) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -158,24 +239,61 @@ router.get("/schedule/recent-results", async (_req, res) => {
 router.post("/", requireAdminAuth, async (req, res) => {
   try {
     const { teamA, teamB, status } = req.body;
-    if (!teamA?.name || !teamB?.name) return res.status(400).json({ message: "Both team names are required" });
-    const rawIds = [...(teamA.players || []), ...(teamB.players || []), teamA.captain, teamB.captain].filter(Boolean);
-    if (rawIds.some((id) => !mongoose.isValidObjectId(id))) return res.status(400).json({ message: "One or more IDs are not valid ObjectIds" });
+    if (!teamA?.name || !teamB?.name)
+      return res.status(400).json({ message: "Both team names are required" });
+    const rawIds = [
+      ...(teamA.players || []),
+      ...(teamB.players || []),
+      teamA.captain,
+      teamB.captain,
+    ].filter(Boolean);
+    if (rawIds.some((id) => !mongoose.isValidObjectId(id)))
+      return res
+        .status(400)
+        .json({ message: "One or more IDs are not valid ObjectIds" });
     const aPlayers = oid(teamA.players || []);
     const bPlayers = oid(teamB.players || []);
     const all = uniq([...aPlayers, ...bPlayers]);
     if (all.length) {
       const count = await Player.countDocuments({ _id: { $in: all } });
-      if (count !== all.length) return res.status(400).json({ message: "One or more player IDs are invalid" });
+      if (count !== all.length)
+        return res
+          .status(400)
+          .json({ message: "One or more player IDs are invalid" });
     }
-    if (teamA.captain && !aPlayers.some((id) => id.toString() === teamA.captain)) return res.status(400).json({ message: "Team A captain must be part of Team A players" });
-    if (teamB.captain && !bPlayers.some((id) => id.toString() === teamB.captain)) return res.status(400).json({ message: "Team B captain must be part of Team B players" });
+    if (
+      teamA.captain &&
+      !aPlayers.some((id) => id.toString() === teamA.captain)
+    )
+      return res
+        .status(400)
+        .json({ message: "Team A captain must be part of Team A players" });
+    if (
+      teamB.captain &&
+      !bPlayers.some((id) => id.toString() === teamB.captain)
+    )
+      return res
+        .status(400)
+        .json({ message: "Team B captain must be part of Team B players" });
 
     const match = await Match.create({
-      teams: [{ name: teamA.name.trim(), players: aPlayers, captain: teamA.captain || null }, { name: teamB.name.trim(), players: bPlayers, captain: teamB.captain || null }],
-      status: status || "upcoming"
+      teams: [
+        {
+          name: teamA.name.trim(),
+          players: aPlayers,
+          captain: teamA.captain || null,
+        },
+        {
+          name: teamB.name.trim(),
+          players: bPlayers,
+          captain: teamB.captain || null,
+        },
+      ],
+      status: status || "upcoming",
     });
-    const populated = await Match.findById(match._id).populate("teams.players", "name playerId").populate("teams.captain", "name playerId");
+    const populated = await Match.findById(match._id)
+      .populate("teams.players", "name playerId")
+      .populate("teams.captain", "name playerId");
     return res.status(201).json({ match: populated });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -185,8 +303,14 @@ router.post("/", requireAdminAuth, async (req, res) => {
 router.get("/:matchId", async (req, res) => {
   try {
     const { matchId } = req.params;
-    if (!mongoose.isValidObjectId(matchId)) return res.status(400).json({ message: "Invalid match ID" });
-    const match = await Match.findById(matchId).populate("teams.players", "name playerId").populate("teams.captain", "name playerId").populate("goals.player", "name playerId").populate("cards.player", "name playerId");
+    if (!mongoose.isValidObjectId(matchId))
+      return res.status(400).json({ message: "Invalid match ID" });
+    const match = await Match.findById(matchId)
+      .populate("teams.players", "name playerId")
+      .populate("teams.captain", "name playerId")
+      .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
+      .populate("cards.player", "name playerId");
     if (!match) return res.status(404).json({ message: "Match not found" });
     return res.status(200).json({ match: mapMatchResponse(match) });
   } catch (error) {
@@ -198,16 +322,40 @@ router.post("/:matchId/goals", requireAdminAuth, async (req, res) => {
   try {
     const { matchId } = req.params;
     const { playerId, minute } = req.body;
-    if (!mongoose.isValidObjectId(matchId) || !mongoose.isValidObjectId(playerId)) return res.status(400).json({ message: "Invalid match or player ID" });
+    if (
+      !mongoose.isValidObjectId(matchId) ||
+      !mongoose.isValidObjectId(playerId)
+    )
+      return res.status(400).json({ message: "Invalid match or player ID" });
     const match = await Match.findById(matchId);
     if (!match) return res.status(404).json({ message: "Match not found" });
-    if (match.status === "finished") return res.status(400).json({ message: "Cannot add goals to a finished match" });
+    if (match.status === "finished")
+      return res
+        .status(400)
+        .json({ message: "Cannot add goals to a finished match" });
 
-    const all = [...(match.teams[0].players || []), ...(match.teams[1].players || [])].map((id) => id.toString());
-    if (!all.includes(playerId)) return res.status(400).json({ message: "Player is not assigned to this match" });
-    const scorerTeamIndex = (match.teams[0].players || []).some((id) => id.toString() === playerId) ? 0 : 1;
+    const all = [
+      ...(match.teams[0].players || []),
+      ...(match.teams[1].players || []),
+    ].map((id) => id.toString());
+    if (!all.includes(playerId))
+      return res
+        .status(400)
+        .json({ message: "Player is not assigned to this match" });
+    const scorerTeamIndex = (match.teams[0].players || []).some(
+      (id) => id.toString() === playerId,
+    )
+      ? 0
+      : 1;
 
-    match.goals.push({ player: playerId, minute: Number.isFinite(Number(minute)) ? Number(minute) : 0, teamIndex: scorerTeamIndex });
+    const { assistPlayerId } = req.body;
+    match.goals.push({
+      player: playerId,
+      assist: mongoose.isValidObjectId(assistPlayerId) ? assistPlayerId : null,
+      minute: Number.isFinite(Number(minute)) ? Number(minute) : 0,
+      teamIndex: scorerTeamIndex,
+    });
+
     if (match.status === "upcoming") match.status = "live";
     await match.save();
 
@@ -215,6 +363,7 @@ router.post("/:matchId/goals", requireAdminAuth, async (req, res) => {
       .populate("teams.players", "name playerId")
       .populate("teams.captain", "name playerId")
       .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
       .populate("cards.player", "name playerId");
     const payload = mapMatchResponse(populated);
     const io = req.app.get("io");
@@ -230,12 +379,16 @@ router.patch("/:matchId/status", requireAdminAuth, async (req, res) => {
   try {
     const { matchId } = req.params;
     const { status } = req.body;
-    if (!mongoose.isValidObjectId(matchId)) return res.status(400).json({ message: "Invalid match ID" });
-    if (!["upcoming", "live", "finished"].includes(status)) return res.status(400).json({ message: "Invalid status" });
+    if (!mongoose.isValidObjectId(matchId))
+      return res.status(400).json({ message: "Invalid match ID" });
+    if (!["upcoming", "live", "finished"].includes(status))
+      return res.status(400).json({ message: "Invalid status" });
     const match = await Match.findById(matchId);
     if (!match) return res.status(404).json({ message: "Match not found" });
     if (match.status === "finished" && status !== "finished") {
-      return res.status(400).json({ message: "Finished matches cannot be reverted" });
+      return res
+        .status(400)
+        .json({ message: "Finished matches cannot be reverted" });
     }
     match.status = status;
     await match.save();
@@ -245,6 +398,7 @@ router.patch("/:matchId/status", requireAdminAuth, async (req, res) => {
       .populate("teams.players", "name playerId")
       .populate("teams.captain", "name playerId")
       .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
       .populate("cards.player", "name playerId");
     const payload = mapMatchResponse(populated);
     const io = req.app.get("io");
@@ -263,33 +417,309 @@ router.patch("/:matchId/status", requireAdminAuth, async (req, res) => {
   }
 });
 
+router.post("/:matchId/cancel", requireAdminAuth, async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    if (!mongoose.isValidObjectId(matchId))
+      return res.status(400).json({ message: "Invalid match ID" });
+    const match = await Match.findById(matchId);
+    if (!match) return res.status(404).json({ message: "Match not found" });
+
+    match.status = "upcoming";
+    match.goals = [];
+    match.cards = [];
+    match.score = { teamA: null, teamB: null };
+    match.ratings = [];
+    match.statsProcessed = false;
+    match.matchDuration = 90;
+    match.timerStartedAt = null;
+    match.timerPausedAt = null;
+    match.timerRunning = false;
+    match.timerOffset = 0;
+
+    await match.save();
+
+    const populated = await Match.findById(match._id)
+      .populate("teams.players", "name playerId")
+      .populate("teams.captain", "name playerId")
+      .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
+      .populate("cards.player", "name playerId");
+    const payload = mapMatchResponse(populated);
+    const io = req.app.get("io");
+    io.emit("match:updated", payload);
+    io.to(match._id.toString()).emit("match:updated", payload);
+    return res
+      .status(200)
+      .json({ message: "Match cancelled and reset", match: payload });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch(
+  "/:matchId/goals/:goalIndex",
+  requireAdminAuth,
+  async (req, res) => {
+    try {
+      const { matchId, goalIndex } = req.params;
+      const { playerId, minute, assistPlayerId } = req.body;
+      if (!mongoose.isValidObjectId(matchId))
+        return res.status(400).json({ message: "Invalid match ID" });
+      const match = await Match.findById(matchId);
+      if (!match) return res.status(404).json({ message: "Match not found" });
+
+      const idx = Number(goalIndex);
+      if (
+        !Number.isInteger(idx) ||
+        idx < 0 ||
+        idx >= (match.goals || []).length
+      ) {
+        return res.status(400).json({ message: "Invalid goal index" });
+      }
+
+      const update = {};
+      if (playerId && mongoose.isValidObjectId(playerId)) {
+        const all = [
+          ...(match.teams[0].players || []),
+          ...(match.teams[1].players || []),
+        ].map((id) => id.toString());
+        if (!all.includes(playerId))
+          return res
+            .status(400)
+            .json({ message: "Player is not assigned to this match" });
+        const scorerTeamIndex = (match.teams[0].players || []).some(
+          (id) => id.toString() === playerId,
+        )
+          ? 0
+          : 1;
+        update.player = playerId;
+        update.teamIndex = scorerTeamIndex;
+      }
+      if (minute !== undefined && Number.isFinite(Number(minute)))
+        update.minute = Number(minute);
+      if (assistPlayerId === null) {
+        update.assist = null;
+      } else if (mongoose.isValidObjectId(assistPlayerId)) {
+        update.assist = assistPlayerId;
+      }
+
+      Object.assign(match.goals[idx], update);
+      await match.save();
+
+      const populated = await Match.findById(match._id)
+        .populate("teams.players", "name playerId")
+        .populate("teams.captain", "name playerId")
+        .populate("goals.player", "name playerId")
+        .populate("goals.assist", "name playerId")
+        .populate("cards.player", "name playerId");
+      const payload = mapMatchResponse(populated);
+      const io = req.app.get("io");
+      io.emit("match:updated", payload);
+      io.to(match._id.toString()).emit("match:updated", payload);
+      return res.status(200).json({ match: payload });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  },
+);
+
+router.patch(
+  "/:matchId/cards/:cardIndex",
+  requireAdminAuth,
+  async (req, res) => {
+    try {
+      const { matchId, cardIndex } = req.params;
+      const { playerId, minute, type } = req.body;
+      if (!mongoose.isValidObjectId(matchId))
+        return res.status(400).json({ message: "Invalid match ID" });
+      const match = await Match.findById(matchId);
+      if (!match) return res.status(404).json({ message: "Match not found" });
+
+      const idx = Number(cardIndex);
+      if (
+        !Number.isInteger(idx) ||
+        idx < 0 ||
+        idx >= (match.cards || []).length
+      ) {
+        return res.status(400).json({ message: "Invalid card index" });
+      }
+
+      const update = {};
+      if (playerId && mongoose.isValidObjectId(playerId)) {
+        const all = [
+          ...(match.teams[0].players || []),
+          ...(match.teams[1].players || []),
+        ].map((id) => id.toString());
+        if (!all.includes(playerId))
+          return res
+            .status(400)
+            .json({ message: "Player is not assigned to this match" });
+        const teamIndex = (match.teams[0].players || []).some(
+          (id) => id.toString() === playerId,
+        )
+          ? 0
+          : 1;
+        update.player = playerId;
+        update.teamIndex = teamIndex;
+      }
+      if (minute !== undefined && Number.isFinite(Number(minute)))
+        update.minute = Number(minute);
+      if (type === "yellow" || type === "red") update.type = type;
+
+      Object.assign(match.cards[idx], update);
+      await match.save();
+
+      const populated = await Match.findById(match._id)
+        .populate("teams.players", "name playerId")
+        .populate("teams.captain", "name playerId")
+        .populate("goals.player", "name playerId")
+        .populate("goals.assist", "name playerId")
+        .populate("cards.player", "name playerId");
+      const payload = mapMatchResponse(populated);
+      const io = req.app.get("io");
+      io.emit("match:updated", payload);
+      io.to(match._id.toString()).emit("match:updated", payload);
+      return res.status(200).json({ match: payload });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  },
+);
+
+router.post("/:matchId/timer/start", requireAdminAuth, async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    const { matchDuration } = req.body;
+    if (!mongoose.isValidObjectId(matchId))
+      return res.status(400).json({ message: "Invalid match ID" });
+    const match = await Match.findById(matchId);
+    if (!match) return res.status(404).json({ message: "Match not found" });
+    if (match.status === "finished")
+      return res
+        .status(400)
+        .json({ message: "Cannot start timer for a finished match" });
+
+    if (Number.isFinite(Number(matchDuration)) && Number(matchDuration) > 0) {
+      match.matchDuration = Number(matchDuration);
+    }
+    match.timerRunning = true;
+    match.timerStartedAt = new Date();
+    match.timerPausedAt = null;
+    if (match.status === "upcoming") match.status = "live";
+
+    await match.save();
+
+    const populated = await Match.findById(match._id)
+      .populate("teams.players", "name playerId")
+      .populate("teams.captain", "name playerId")
+      .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
+      .populate("cards.player", "name playerId");
+    const payload = mapMatchResponse(populated);
+    const io = req.app.get("io");
+    io.emit("match:updated", payload);
+    io.to(match._id.toString()).emit("match:updated", payload);
+    return res.status(200).json({ match: payload });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post("/:matchId/timer/pause", requireAdminAuth, async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    const { finishMatch } = req.body;
+    if (!mongoose.isValidObjectId(matchId))
+      return res.status(400).json({ message: "Invalid match ID" });
+    const match = await Match.findById(matchId);
+    if (!match) return res.status(404).json({ message: "Match not found" });
+    if (!match.timerRunning)
+      return res.status(400).json({ message: "Timer is not running" });
+
+    const now = new Date();
+    const started = match.timerStartedAt ? new Date(match.timerStartedAt) : now;
+    const elapsedMs = now - started;
+    match.timerOffset += Math.floor(elapsedMs / 1000);
+    match.timerRunning = false;
+    match.timerPausedAt = now;
+
+    if (finishMatch) {
+      match.status = "finished";
+      await applyFinishedMatchStats(match);
+    }
+
+    await match.save();
+
+    const populated = await Match.findById(match._id)
+      .populate("teams.players", "name playerId")
+      .populate("teams.captain", "name playerId")
+      .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
+      .populate("cards.player", "name playerId");
+    const payload = mapMatchResponse(populated);
+    const io = req.app.get("io");
+    io.emit("match:updated", payload);
+    io.to(match._id.toString()).emit("match:updated", payload);
+    if (finishMatch) {
+      io.emit("match:statusChanged", {
+        matchId: match._id.toString(),
+        status: "finished",
+      });
+      io.to(match._id.toString()).emit("match:statusChanged", {
+        matchId: match._id.toString(),
+        status: "finished",
+      });
+    }
+    return res.status(200).json({ match: payload });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post("/:matchId/cards", requireAdminAuth, async (req, res) => {
   try {
     const { matchId } = req.params;
     const { playerId, minute, type } = req.body;
-    if (!mongoose.isValidObjectId(matchId) || !mongoose.isValidObjectId(playerId)) {
+    if (
+      !mongoose.isValidObjectId(matchId) ||
+      !mongoose.isValidObjectId(playerId)
+    ) {
       return res.status(400).json({ message: "Invalid match or player ID" });
     }
     if (!["yellow", "red"].includes(type)) {
-      return res.status(400).json({ message: "Card type must be yellow or red" });
+      return res
+        .status(400)
+        .json({ message: "Card type must be yellow or red" });
     }
     const match = await Match.findById(matchId);
     if (!match) return res.status(404).json({ message: "Match not found" });
     if (match.status === "finished") {
-      return res.status(400).json({ message: "Cannot add cards to a finished match" });
+      return res
+        .status(400)
+        .json({ message: "Cannot add cards to a finished match" });
     }
 
-    const all = [...(match.teams[0].players || []), ...(match.teams[1].players || [])].map((id) => id.toString());
+    const all = [
+      ...(match.teams[0].players || []),
+      ...(match.teams[1].players || []),
+    ].map((id) => id.toString());
     if (!all.includes(playerId)) {
-      return res.status(400).json({ message: "Player is not assigned to this match" });
+      return res
+        .status(400)
+        .json({ message: "Player is not assigned to this match" });
     }
-    const teamIndex = (match.teams[0].players || []).some((id) => id.toString() === playerId) ? 0 : 1;
+    const teamIndex = (match.teams[0].players || []).some(
+      (id) => id.toString() === playerId,
+    )
+      ? 0
+      : 1;
 
     match.cards.push({
       player: playerId,
       minute: Number.isFinite(Number(minute)) ? Number(minute) : 0,
       teamIndex,
-      type
+      type,
     });
     if (match.status === "upcoming") match.status = "live";
     await match.save();
@@ -298,6 +728,7 @@ router.post("/:matchId/cards", requireAdminAuth, async (req, res) => {
       .populate("teams.players", "name playerId")
       .populate("teams.captain", "name playerId")
       .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
       .populate("cards.player", "name playerId");
     const payload = mapMatchResponse(populated);
     const io = req.app.get("io");
@@ -338,6 +769,7 @@ router.patch("/:matchId/schedule", requireAdminAuth, async (req, res) => {
       .populate("teams.players", "name playerId")
       .populate("teams.captain", "name playerId")
       .populate("goals.player", "name playerId")
+      .populate("goals.assist", "name playerId")
       .populate("cards.player", "name playerId");
 
     const payload = mapMatchResponse(populated);
@@ -356,35 +788,79 @@ router.post("/:matchId/ratings", requirePlayerAuth, async (req, res) => {
     const { matchId } = req.params;
     const { targetPlayerId, score } = req.body;
     const numericScore = Number(score);
-    if (!mongoose.isValidObjectId(matchId) || !mongoose.isValidObjectId(targetPlayerId)) return res.status(400).json({ message: "Invalid match or target player ID" });
-    if (!Number.isInteger(numericScore) || numericScore < 1 || numericScore > 10) return res.status(400).json({ message: "Score must be an integer between 1 and 10" });
+    if (
+      !mongoose.isValidObjectId(matchId) ||
+      !mongoose.isValidObjectId(targetPlayerId)
+    )
+      return res
+        .status(400)
+        .json({ message: "Invalid match or target player ID" });
+    if (
+      !Number.isInteger(numericScore) ||
+      numericScore < 1 ||
+      numericScore > 10
+    )
+      return res
+        .status(400)
+        .json({ message: "Score must be an integer between 1 and 10" });
     const raterId = req.user.sub;
-    if (!mongoose.isValidObjectId(raterId)) return res.status(401).json({ message: "Invalid player token" });
-    if (raterId === targetPlayerId) return res.status(400).json({ message: "You can only rate another player" });
+    if (!mongoose.isValidObjectId(raterId))
+      return res.status(401).json({ message: "Invalid player token" });
+    if (raterId === targetPlayerId)
+      return res
+        .status(400)
+        .json({ message: "You can only rate another player" });
 
     const match = await Match.findById(matchId);
     if (!match) return res.status(404).json({ message: "Match not found" });
-    if (match.status !== "finished") return res.status(400).json({ message: "Ratings are only allowed after match is finished" });
-    const all = uniq([...(match.teams[0].players || []), ...(match.teams[1].players || [])]);
-    if (!all.includes(raterId) || !all.includes(targetPlayerId)) return res.status(403).json({ message: "Rater and target must belong to this match" });
-    const alreadyRated = (match.ratings || []).some((entry) => entry.rater.toString() === raterId);
-    if (alreadyRated) return res.status(409).json({ message: "You have already submitted a rating for this match" });
+    if (match.status !== "finished")
+      return res
+        .status(400)
+        .json({ message: "Ratings are only allowed after match is finished" });
+    const all = uniq([
+      ...(match.teams[0].players || []),
+      ...(match.teams[1].players || []),
+    ]);
+    if (!all.includes(raterId) || !all.includes(targetPlayerId))
+      return res
+        .status(403)
+        .json({ message: "Rater and target must belong to this match" });
+    const alreadyRated = (match.ratings || []).some(
+      (entry) => entry.rater.toString() === raterId,
+    );
+    if (alreadyRated)
+      return res.status(409).json({
+        message: "You have already submitted a rating for this match",
+      });
 
-    match.ratings.push({ rater: raterId, target: targetPlayerId, score: numericScore });
+    match.ratings.push({
+      rater: raterId,
+      target: targetPlayerId,
+      score: numericScore,
+    });
     await match.save();
 
     const target = await Player.findById(targetPlayerId);
     if (target) {
       target.stats.ratingTotal += numericScore;
       target.stats.ratingCount += 1;
-      target.stats.rating = Number((target.stats.ratingTotal / target.stats.ratingCount).toFixed(2));
+      target.stats.rating = Number(
+        (target.stats.ratingTotal / target.stats.ratingCount).toFixed(2),
+      );
       await target.save();
     }
 
-    const targetRatings = match.ratings.filter((entry) => entry.target.toString() === targetPlayerId);
+    const targetRatings = match.ratings.filter(
+      (entry) => entry.target.toString() === targetPlayerId,
+    );
     const total = targetRatings.reduce((sum, entry) => sum + entry.score, 0);
     const average = Number((total / targetRatings.length).toFixed(2));
-    return res.status(201).json({ message: "Rating submitted", targetPlayerId, averageRatingForThisMatch: average, totalRatingsForThisMatch: targetRatings.length });
+    return res.status(201).json({
+      message: "Rating submitted",
+      targetPlayerId,
+      averageRatingForThisMatch: average,
+      totalRatingsForThisMatch: targetRatings.length,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -404,7 +880,10 @@ router.delete("/:matchId", requireAdminAuth, async (req, res) => {
 
     await Promise.all([
       Match.deleteOne({ _id: match._id }),
-      Tournament.updateMany({ matches: match._id }, { $pull: { matches: match._id } }),
+      Tournament.updateMany(
+        { matches: match._id },
+        { $pull: { matches: match._id } },
+      ),
     ]);
 
     return res.status(200).json({ message: "Match deleted" });
@@ -428,7 +907,9 @@ router.post(
         return res.status(404).json({ message: "Match not found" });
       }
       if (!req.file?.buffer) {
-        return res.status(400).json({ message: "Poster image file is required" });
+        return res
+          .status(400)
+          .json({ message: "Poster image file is required" });
       }
 
       const posterUrl = await uploadMatchPosterBuffer(
