@@ -302,11 +302,12 @@ export default function Home() {
                           </span>
                         </div>
                       </div>
+                      {/* View Match Details button - links to match result page */}
                       <Link
-                        className="btn btn-sm btn-ghost"
                         to={`/match/${id}`}
+                        className="btn btn-primary btn-sm"
                       >
-                        Match Details →
+                        View Match Details
                       </Link>
                       {isAdmin && (
                         <button

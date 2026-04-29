@@ -197,22 +197,19 @@ export default function AdminPanel() {
     try {
       const data = await fetchWithAuth("/stats/admin/stats");
       setStats(data);
-    } catch (error) {
-    }
+    } catch (error) {}
   };
   const loadPlayers = async () => {
     try {
       const { players } = await fetchWithAuth("/players");
       setPlayers(players || []);
-    } catch (error) {
-    }
+    } catch (error) {}
   };
   const loadTournaments = async () => {
     try {
       const { tournaments } = await fetchWithAuth("/tournaments");
       setTournaments(tournaments || []);
-    } catch (error) {
-    }
+    } catch (error) {}
   };
 
   const normalizeTeamPlayerIds = (team) => {
@@ -288,8 +285,7 @@ export default function AdminPanel() {
         (m) => m.status === "live" || m.status === "upcoming",
       );
       setLiveMatches(live);
-    } catch (error) {
-    }
+    } catch (error) {}
   };
 
   useEffect(() => {
@@ -881,6 +877,48 @@ export default function AdminPanel() {
     if (!fixtureId) return;
     await loadLiveMatches();
     navigate(`/live-match?matchId=${fixtureId}`);
+  };
+
+  // Fix for time setting issue - proper ISO conversion and API call
+  const handleFixtureTimeChange = async (fixtureId, localDateTimeValue) => {
+    try {
+      if (!localDateTimeValue) {
+        // If cleared, send null
+        await fetchWithAuth(`/matches/${fixtureId}/schedule`, {
+          method: "PATCH",
+          body: JSON.stringify({ scheduledAt: null }),
+        });
+        await loadTournamentDetails(
+          selectedTournament?._id || selectedTournament?.id,
+        );
+        return;
+      }
+
+      // Convert datetime-local value (e.g., "2026-04-11T15:30") to ISO string
+      // datetime-local is always in local timezone, so we need to convert properly
+      const localDate = new Date(localDateTimeValue);
+      const isoString = localDate.toISOString();
+
+      console.log("Fixture time update:", {
+        fixtureId,
+        localInput: localDateTimeValue,
+        convertedISO: isoString,
+      });
+
+      await fetchWithAuth(`/matches/${fixtureId}/schedule`, {
+        method: "PATCH",
+        body: JSON.stringify({ scheduledAt: isoString }),
+      });
+
+      // Reload tournament details to confirm the change
+      await loadTournamentDetails(
+        selectedTournament?._id || selectedTournament?.id,
+      );
+      notify("Fixture time updated successfully", "success");
+    } catch (error) {
+      console.error("Error updating fixture time:", error);
+      notify(`Could not update fixture time: ${error.message}`, "error");
+    }
   };
 
   const upcomingTournamentFixtures = tournamentFixtures.filter(
@@ -1709,12 +1747,19 @@ export default function AdminPanel() {
                                   value={
                                     fixtureScheduleDrafts[fixture.id] || ""
                                   }
-                                  onChange={(e) =>
+                                  onChange={(e) => {
                                     setFixtureScheduleDrafts((current) => ({
                                       ...current,
                                       [fixture.id]: e.target.value,
-                                    }))
-                                  }
+                                    }));
+                                    // Auto-save when time is changed (with proper ISO conversion)
+                                    if (e.target.value) {
+                                      handleFixtureTimeChange(
+                                        fixture.id,
+                                        e.target.value,
+                                      );
+                                    }
+                                  }}
                                 />
                                 <button
                                   type="button"
@@ -1722,6 +1767,7 @@ export default function AdminPanel() {
                                   onClick={() =>
                                     handleFixtureScheduleUpdate(fixture.id)
                                   }
+                                  title="Legacy save button - time auto-saves on change"
                                 >
                                   Set Fixture
                                 </button>
